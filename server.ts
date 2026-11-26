@@ -16,7 +16,7 @@ import {
   type OperatorSessionPayload,
 } from './server/security.ts';
 import { store } from './server/store.ts';
-import type { CallAnalysisReport, DialogueTurn, ExternalTransferPayload, TransferJob } from './server/types.ts';
+import type { CallAnalysisReport, DialogueTurn, ExternalTransferPayload, PbxRecording, TransferJob } from './server/types.ts';
 
 const PORT = 3000;
 const ALLOWED_AUDIO_MIMES = new Set([
@@ -609,6 +609,16 @@ async function startServer(): Promise<void> {
         details: `שויכה לתיק לקוח ${customer.fullName} (${customer.caseNumber}).`,
       });
 
+      // WrapUpAI: העברה אוטומטית - כל הקלטה חדשה נשלחת מיד לניתוח, בלי לחיצה
+      if (process.env.AUTO_TRANSFER_TO_EXTERNAL === 'true') {
+        const created = store.recordings.find((r) => r.id === recId);
+        if (created) {
+          await startExternalTransfer(created, 'מרכזייה · העברה אוטומטית').catch((err) =>
+            console.error('auto-transfer failed', err)
+          );
+        }
+      }
+
       const snapshot = buildMaskedSnapshot();
       store.broadcast('state_update', snapshot);
       res.status(201).json(snapshot);
@@ -641,6 +651,77 @@ async function startServer(): Promise<void> {
   });
 
   // ONE-CLICK TRANSFER TO RESTRICTED EXTERNAL SYSTEM
+  // (WrapUpAI: הלוגיקה הועברה לפונקציה כדי שהמרכזייה תוכל גם להעביר אוטומטית כל הקלטה חדשה)
+  async function startExternalTransfer(rec: PbxRecording, actorName: string): Promise<TransferJob> {
+    const { buffer, mimeType } = await ensureRecordingAudio(rec.id);
+
+    const jobId = `JOB-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const { token: transferToken, expiresAtIso } = issueScopedTransferToken({
+      jobId,
+      recordingId: rec.id,
+      uniqueCallName: rec.uniqueCallName,
+    });
+
+    const maskedPayload: ExternalTransferPayload = {
+      jobId,
+      uniqueCallName: rec.uniqueCallName,
+      callDate: rec.callDate,
+      anonymizedParticipants: rec.participants.map((p) => ({
+        anonymizedLabel: p.anonymizedLabel,
+        role: p.role,
+      })),
+      piiStrippedFields: [
+        'customerName',
+        'nationalId',
+        'phone',
+        'city',
+        'branch',
+        'caseNumber',
+        'crmHistory',
+      ],
+      tokenScope: 'audio_transcribe_only',
+      tokenExpiresAt: expiresAtIso,
+    };
+
+    const job: TransferJob = {
+      jobId,
+      recordingId: rec.id,
+      uniqueCallName: rec.uniqueCallName,
+      customerId: rec.customerId,
+      initiatedBy: actorName,
+      initiatedAt: new Date().toISOString(),
+      stage: 'token_verified',
+      audioPurged: false,
+      maskedPayload,
+    };
+
+    store.transferJobs.unshift(job);
+    rec.status = 'analyzing_external';
+    rec.latestJobId = jobId;
+
+    store.addAuditLog({
+      actor: actorName,
+      system: 'security_gateway',
+      action: 'העברה מבוקרת בלחיצה אחת למערכת התמלול החיצונית',
+      resource: `${rec.uniqueCallName} · ${jobId}`,
+      outcome: 'verified',
+      details:
+        'הונפק טוקן HMAC חד-פעמי (תוקף 120 שניות, הרשאת אודיו בלבד). הוסרו 7 שדות PII מזהים טרם היציאה.',
+    });
+
+    store.broadcast('state_update', buildMaskedSnapshot());
+
+    // Launch isolated external analysis asynchronously over HTTP boundary
+    void executeIsolatedExternalAnalysis({
+      transferToken,
+      job,
+      audioBuffer: buffer,
+      mimeType,
+      internalPort: PORT,
+    });
+    return job;
+  }
+
   app.post('/api/internal/recordings/:id/transfer', requireOperatorAuth, async (req, res) => {
     try {
       const rec = store.recordings.find((r) => r.id === req.params.id);
@@ -654,73 +735,7 @@ async function startServer(): Promise<void> {
         return;
       }
 
-      const { buffer, mimeType } = await ensureRecordingAudio(rec.id);
-
-      const jobId = `JOB-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-      const { token: transferToken, expiresAtIso } = issueScopedTransferToken({
-        jobId,
-        recordingId: rec.id,
-        uniqueCallName: rec.uniqueCallName,
-      });
-
-      const maskedPayload: ExternalTransferPayload = {
-        jobId,
-        uniqueCallName: rec.uniqueCallName,
-        callDate: rec.callDate,
-        anonymizedParticipants: rec.participants.map((p) => ({
-          anonymizedLabel: p.anonymizedLabel,
-          role: p.role,
-        })),
-        piiStrippedFields: [
-          'customerName',
-          'nationalId',
-          'phone',
-          'city',
-          'branch',
-          'caseNumber',
-          'crmHistory',
-        ],
-        tokenScope: 'audio_transcribe_only',
-        tokenExpiresAt: expiresAtIso,
-      };
-
-      const job: TransferJob = {
-        jobId,
-        recordingId: rec.id,
-        uniqueCallName: rec.uniqueCallName,
-        customerId: rec.customerId,
-        initiatedBy: req.operator!.operatorName,
-        initiatedAt: new Date().toISOString(),
-        stage: 'token_verified',
-        audioPurged: false,
-        maskedPayload,
-      };
-
-      store.transferJobs.unshift(job);
-      rec.status = 'analyzing_external';
-      rec.latestJobId = jobId;
-
-      store.addAuditLog({
-        actor: req.operator!.operatorName,
-        system: 'security_gateway',
-        action: 'העברה מבוקרת בלחיצה אחת למערכת התמלול החיצונית',
-        resource: `${rec.uniqueCallName} · ${jobId}`,
-        outcome: 'verified',
-        details:
-          'הונפק טוקן HMAC חד-פעמי (תוקף 120 שניות, הרשאת אודיו בלבד). הוסרו 7 שדות PII מזהים טרם היציאה.',
-      });
-
-      store.broadcast('state_update', buildMaskedSnapshot());
-
-      // Launch isolated external analysis asynchronously over HTTP boundary
-      void executeIsolatedExternalAnalysis({
-        transferToken,
-        job,
-        audioBuffer: buffer,
-        mimeType,
-        internalPort: PORT,
-      });
-
+      const job = await startExternalTransfer(rec, req.operator!.operatorName);
       res.status(202).json({
         job,
         snapshot: buildMaskedSnapshot(),
@@ -729,6 +744,41 @@ async function startServer(): Promise<void> {
       const message = error instanceof Error ? error.message : 'שגיאה בהעברת השיחה למערכת החיצונית.';
       res.status(500).json({ error: message });
     }
+  });
+
+  // WrapUpAI: עדכוני התקדמות/כישלון חתומים מהמערכת החיצונית - סנכרון חי של שלב העיבוד במרכזייה
+  app.post('/api/internal/external-status', (req, res) => {
+    const serialized = JSON.stringify(req.body);
+    if (!verifyExternalReportSignature(serialized, req.header('X-External-Signature'))) {
+      res.status(403).json({ error: 'חתימת מערכת חיצונית אינה תקפה.' });
+      return;
+    }
+    const { jobId, stage, error } = req.body as { jobId: string; stage: TransferJob['stage']; error?: string };
+    const job = store.transferJobs.find((j) => j.jobId === jobId);
+    if (!job) {
+      res.status(404).json({ error: 'מזהה משימת ההעברה לא נמצא.' });
+      return;
+    }
+    if (job.stage !== 'completed_and_purged') {
+      job.stage = stage;
+      if (stage === 'failed') {
+        job.error = error || 'כשל בעיבוד במערכת החיצונית';
+        job.audioPurged = true;
+        const rec = store.recordings.find((r) => r.id === job.recordingId);
+        if (rec && rec.status !== 'report_returned') rec.status = 'pending_transfer';
+        store.addAuditLog({
+          actor: 'WrapUpAI (מערכת חיצונית)',
+          system: 'external_analytics',
+          action: 'דיווח כישלון חתום מהמערכת החיצונית',
+          resource: job.uniqueCallName,
+          outcome: 'verified',
+          details: job.error,
+        });
+      }
+      store.save();
+      store.broadcast('state_update', buildMaskedSnapshot());
+    }
+    res.json({ ok: true });
   });
 
   // SIGNED REPORT RETURN INGEST GATEWAY (Called by External System — NO direct DB access!)
@@ -750,7 +800,14 @@ async function startServer(): Promise<void> {
     }
 
     const { jobId, analysis, wrapup } = req.body as {
-      wrapup?: { delivery: string; sentTo: string[]; pdfFileName?: string | null; pdfBase64?: string | null };
+      wrapup?: {
+        delivery: string;
+        sentTo: string[];
+        pdfFileName?: string | null;
+        pdfBase64?: string | null;
+        customerPdfFileName?: string | null;
+        customerPdfBase64?: string | null;
+      };
       jobId: string;
       analysis: {
         executiveSummary: string;
@@ -792,14 +849,18 @@ async function startServer(): Promise<void> {
 
     // WrapUpAI: שמירת קובץ ה-PDF שהוחזר בשרת הארגון + פרטי המסירה במייל
     if (wrapup) {
-      let pdfFileName: string | null = null;
-      if (wrapup.pdfBase64 && wrapup.pdfFileName) {
-        const dir = path.resolve(process.cwd(), '.local-data', 'wrapup-pdfs');
-        fs.mkdirSync(dir, { recursive: true });
-        pdfFileName = `${reportId}.pdf`;
-        fs.writeFileSync(path.join(dir, pdfFileName), Buffer.from(wrapup.pdfBase64, 'base64'));
+      const dir = path.resolve(process.cwd(), '.local-data', 'wrapup-pdfs');
+      fs.mkdirSync(dir, { recursive: true });
+      if (wrapup.pdfBase64) fs.writeFileSync(path.join(dir, `${reportId}.pdf`), Buffer.from(wrapup.pdfBase64, 'base64'));
+      if (wrapup.customerPdfBase64) {
+        fs.writeFileSync(path.join(dir, `${reportId}-customer.pdf`), Buffer.from(wrapup.customerPdfBase64, 'base64'));
       }
-      report.wrapup = { delivery: wrapup.delivery, sentTo: wrapup.sentTo || [], pdfFileName: wrapup.pdfFileName || pdfFileName };
+      report.wrapup = {
+        delivery: wrapup.delivery,
+        sentTo: wrapup.sentTo || [],
+        pdfFileName: wrapup.pdfBase64 ? wrapup.pdfFileName || `${reportId}.pdf` : null,
+        customerPdfFileName: wrapup.customerPdfBase64 ? wrapup.customerPdfFileName || `${reportId}-customer.pdf` : null,
+      };
     }
 
     // Replace older report for the same recording if re-analyzed, otherwise prepend
@@ -838,7 +899,13 @@ async function startServer(): Promise<void> {
   // WrapUpAI: הורדת ה-PDF שהוחזר מהמערכת החיצונית ונשמר בשרת הארגון
   app.get('/api/internal/reports/:reportId/wrapup-pdf', requireOperatorAuth, (req, res) => {
     const report = store.reports.find((r) => r.id === req.params.reportId);
-    const file = path.resolve(process.cwd(), '.local-data', 'wrapup-pdfs', `${String(req.params.reportId).replace(/[^A-Z0-9-]/gi, '')}.pdf`);
+    const suffix = req.query.kind === 'customer' ? '-customer' : '';
+    const file = path.resolve(
+      process.cwd(),
+      '.local-data',
+      'wrapup-pdfs',
+      `${String(req.params.reportId).replace(/[^A-Z0-9-]/gi, '')}${suffix}.pdf`
+    );
     if (!report || !fs.existsSync(file)) {
       res.status(404).json({ error: 'קובץ ה-PDF של WrapUpAI לא נמצא.' });
       return;

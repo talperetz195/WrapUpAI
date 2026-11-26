@@ -348,21 +348,28 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                          {activeReport.wrapup?.pdfFileName && (
-                            <button
-                              onClick={async () => {
-                                try {
-                                  const blob = await fetchWrapupPdfBlob(token, activeReport.id);
-                                  window.open(URL.createObjectURL(blob), '_blank');
-                                } catch (err) {
-                                  alert(err instanceof Error ? err.message : 'שגיאה בפתיחת ה-PDF');
-                                }
-                              }}
-                              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors whitespace-nowrap"
-                            >
-                              <FileText className="w-3.5 h-3.5" />
-                              <span>PDF מ-WrapUpAI</span>
-                            </button>
+                          {(['business', 'customer'] as const).map((kind) =>
+                            (kind === 'business' ? activeReport.wrapup?.pdfFileName : activeReport.wrapup?.customerPdfFileName) ? (
+                              <button
+                                key={kind}
+                                onClick={async () => {
+                                  try {
+                                    const blob = await fetchWrapupPdfBlob(token, activeReport.id, kind);
+                                    window.open(URL.createObjectURL(blob), '_blank');
+                                  } catch (err) {
+                                    alert(err instanceof Error ? err.message : 'שגיאה בפתיחת ה-PDF');
+                                  }
+                                }}
+                                className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                                  kind === 'business'
+                                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                    : 'bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50'
+                                }`}
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>{kind === 'business' ? 'PDF סיכום ותחושות לקוח (WrapUpAI)' : 'PDF שנשלח ללקוח'}</span>
+                              </button>
+                            ) : null
                           )}
                           <button
                             onClick={() => onOpenPdf(activeReport.id)}

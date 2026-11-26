@@ -45,8 +45,12 @@ export async function loginOperator(passcode: string): Promise<AuthSessionRespon
 }
 
 /** WrapUpAI: ה-PDF שהוחזר מהמערכת החיצונית ונשמר בשרת הארגון */
-export async function fetchWrapupPdfBlob(token: string, reportId: string): Promise<Blob> {
-  const res = await fetch(`/api/internal/reports/${encodeURIComponent(reportId)}/wrapup-pdf`, {
+export async function fetchWrapupPdfBlob(
+  token: string,
+  reportId: string,
+  kind: 'business' | 'customer' = 'business'
+): Promise<Blob> {
+  const res = await fetch(`/api/internal/reports/${encodeURIComponent(reportId)}/wrapup-pdf?kind=${kind}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {

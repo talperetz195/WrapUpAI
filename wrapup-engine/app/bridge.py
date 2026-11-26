@@ -177,6 +177,33 @@ def to_team_report(a: dict, transcript: str) -> dict:
 
 # ---------- הטיפול עצמו (ברקע) ----------
 
+TEAM_STAGE = {"transcribing": "transcribing_audio", "analyzing": "analyzing_topics", "delivering": "signing_and_returning"}
+
+
+def _post_signed(path_suffix: str, payload: dict) -> requests.Response:
+    base = os.getenv("TEAM_INGEST_URL", "http://127.0.0.1:3000/api/internal/ingest-report").rsplit("/", 1)[0]
+    serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return requests.post(f"{base}/{path_suffix}", data=serialized.encode(), timeout=60,
+                         headers={"Content-Type": "application/json", "X-External-Signature": _sign(serialized)})
+
+
+def _status(job_id: str, stage: str, error: str | None = None) -> None:
+    """מעדכן את המרכזייה בשלב העיבוד (חתום) - המסך שלהן מתעדכן בזמן אמת."""
+    payload = {"jobId": job_id, "stage": stage}
+    if error:
+        payload["error"] = error
+    try:
+        _post_signed("external-status", payload)
+    except requests.RequestException as e:
+        log.warning("[bridge] עדכון סטטוס נכשל: %s", e)
+
+
+def _pdf_payload(path: Path | None) -> dict:
+    if not path:
+        return {"fileName": None, "base64": None}
+    return {"fileName": path.name, "base64": base64.b64encode(path.read_bytes()).decode()}
+
+
 def _run_job(body: dict) -> None:
     job_id = body["jobId"]
     recipients = [(r.get("name") or "", r["email"]) for r in body.get("deliveryRecipients") or [] if r.get("email")]
@@ -188,16 +215,22 @@ def _run_job(body: dict) -> None:
             # שם הלקוח מגיע רק לצורך המסירה (שם ה-PDF והפנייה במייל) - לא נשלח למודל ה-AI
             hint = {"name": recipients[0][0]} if recipients and recipients[0][0] else {}
             result = process_file(path, source="api:מרכזיית הצוות", display_name=path.name,
-                                  customer_hint=hint, recipients=recipients)
-        pdf = (result.get("pdfs") or {}).get("customer")
+                                  customer_hint=hint, recipients=recipients,
+                                  on_progress=lambda st: _status(job_id, TEAM_STAGE[st]))
+        pdfs = result.get("pdfs") or {}
+        biz, cust = _pdf_payload(pdfs.get("business")), _pdf_payload(pdfs.get("customer"))
         callback = {
             "jobId": job_id,
             "analysis": to_team_report(result["analysis"], result["transcript"]),
             "wrapup": {
                 "delivery": result["delivery"],
                 "sentTo": result.get("sent_to", []),
-                "pdfFileName": pdf.name if pdf else None,
-                "pdfBase64": base64.b64encode(pdf.read_bytes()).decode() if pdf else None,
+                # PDF לארגון: סיכום הפגישה + תחושות הלקוח (מפה רגשית, סיכון נטישה)
+                "pdfFileName": biz["fileName"],
+                "pdfBase64": biz["base64"],
+                # PDF שנשלח ללקוחות במייל
+                "customerPdfFileName": cust["fileName"],
+                "customerPdfBase64": cust["base64"],
             },
         }
     except Exception as e:  # noqa: BLE001
@@ -207,11 +240,9 @@ def _run_job(body: dict) -> None:
 
     if callback is None:
         log.warning("[bridge] לא נשלח דוח עבור %s: %s", job_id, error)
+        _status(job_id, "failed", f"WrapUpAI: {error}")  # המרכזייה משחררת את השיחה לניסיון חוזר
         return
-    serialized = json.dumps(callback, ensure_ascii=False, separators=(",", ":"))
-    resp = requests.post(os.getenv("TEAM_INGEST_URL", "http://127.0.0.1:3000/api/internal/ingest-report"),
-                         data=serialized.encode(), timeout=60,
-                         headers={"Content-Type": "application/json", "X-External-Signature": _sign(serialized)})
+    resp = _post_signed("ingest-report", callback)
     log.info("[bridge] %s → ingest %s %s", job_id, resp.status_code, resp.text[:200])
 
 
@@ -220,5 +251,6 @@ def accept(token: str | None, body: dict) -> dict:
         if not body.get(field):
             raise BridgeError(f"חסר שדה: {field}")
     verify_transfer_token(token, body["jobId"])
+    _status(body["jobId"], "token_verified")
     threading.Thread(target=_run_job, args=(body,), daemon=True, name=f"bridge-{body['jobId']}").start()
     return {"ok": True, "jobId": body["jobId"], "accepted": True}

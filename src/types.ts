@@ -88,6 +88,7 @@ export interface WrapUpDelivery {
   delivery: string;
   sentTo: string[];
   pdfFileName?: string | null;
+  customerPdfFileName?: string | null;
 }
 
 export interface CallAnalysisReport {

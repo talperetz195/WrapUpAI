@@ -40,6 +40,8 @@ h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;color:#4f46e5;margin:20px 0 
 .msg{background:#e7f6ee;padding:12px;border-radius:8px;white-space:pre-wrap} dt{font-weight:600} dd{margin:0 0 8px;color:#6b7385}
 .guard{background:#fde8e7;border:2px solid #d93025;border-radius:10px;padding:12px;margin:10px 0;color:#7a1610}
 .guard div{background:#fff;color:#1d2433;border-radius:8px;padding:8px;margin-top:8px}
+.emos{width:100%;border-collapse:separate;border-spacing:6px}.emo{background:#f5f6fa;border-radius:8px;padding:8px;text-align:center;vertical-align:top;width:33%}
+.meter{height:8px;background:#eceef3;border-radius:99px;overflow:hidden;margin:8px 0 4px}.meter div{height:100%}
 .meet{background:#eef0ff;border:2px solid #4f46e5;border-radius:10px;padding:12px;margin:12px 0}
 a.cal.big{font-size:15px;padding:8px 16px;margin:8px 0 0;display:inline-block}
 a.cal{display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:3px 10px;border-radius:6px;font-size:12px;margin-inline-start:6px}
@@ -154,13 +156,18 @@ def business_report(call: dict) -> str:
     if a.get("emotion_map"):
         churn = a["churn_risk"]
         color = "#d93025" if churn >= 60 else "#e8a100" if churn >= 30 else "#0f9d58"
-        emotion = ("<h2>🎭 מפה רגשית ומכ\"ם נטישה</h2><p>"
-                   + " ← ".join(f"{STAGE[e['stage']]}: <b>{EMOTION.get(e['emotion'], e['emotion'])}</b>" for e in a["emotion_map"])
-                   + f"</p><p>סיכון נטישה: <b style='color:{color}'>{churn}%</b> · {_e(a['churn_reason'])}"
+        cells = "".join(
+            f"<td class='emo'><div class='muted'>{STAGE[e['stage']]}</div><b>{EMOTION.get(e['emotion'], e['emotion'])}</b>"
+            f"<div class='muted'>\"{_e(e['evidence'])}\"</div></td>" for e in a["emotion_map"])
+        emotion = ("<h2>🎭 תחושות הלקוח במהלך השיחה</h2>"
+                   f"<table class='emos'><tr>{cells}</tr></table>"
+                   f"<p>הלקוח סיים את השיחה: <b>{EMOTION.get(a.get('customer_end_emotion'), '')}</b></p>"
+                   f"<div class='meter'><div style='width:{churn}%;background:{color}'></div></div>"
+                   f"<p>סיכון נטישה: <b style='color:{color}'>{churn}%</b> · {_e(a['churn_reason'])}"
                    + ("<br><b style='color:#d93025'>🚨 נפתחה משימת שימור לראש הצוות</b>" if churn >= db.CHURN_THRESHOLD else "")
                    + "</p>")
     body = f"""
-      <h1>דוח שיחה: {_e(c.get('name'))}</h1>
+      <h1>סיכום פגישה ותחושות לקוח: {_e(c.get('name'))}</h1>
       <div class="muted">תיק #{c['id']} · טלפון {_e(c.get('phone') or '-')} · מספר לקוח {_e(c.get('customer_number') or '-')}<br>
       {_e(call['created_at'])} · סוג: {CATEGORIES.get(a['category'], '')} · סטטוס: {STATUS.get(a['status'], '')} · קובץ: {_e(call.get('filename') or '-')}</div>
       {_policy_block(a, for_customer=False)}{risks}

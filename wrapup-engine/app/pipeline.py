@@ -26,19 +26,23 @@ def phone_from_filename(name: str) -> str | None:
 
 def process_file(path: Path, source: str, customer_id: int | None = None,
                  display_name: str | None = None, customer_hint: dict | None = None,
-                 recipients: list[tuple[str, str]] | None = None) -> dict:
+                 recipients: list[tuple[str, str]] | None = None, on_progress=None) -> dict:
     """customer_hint: פרטי לקוח שהגיעו מהמערכת של העסק (שם/טלפון/מייל) - הכי אמינים לזיהוי."""
     hint = customer_hint or {}
+    progress = on_progress or (lambda stage: None)
     name = display_name or path.name
     job_id = db.create_job(name, source)
     try:
+        progress("transcribing")
         glossary = db.get_glossary()
         raw = transcribe_file(path, list(glossary))              # 1. תמלול (עם מונחי העסק)
         clean, removed = redact(raw)                             # 2. סינון
+        progress("analyzing")
         analysis = analyzer.analyze(clean, glossary, db.get_policy())  # 3. ניתוח + Policy Guard
         saved = db.save_call(analysis, clean, removed, name, customer_id,
                              phone_hint=hint.get("phone") or phone_from_filename(name))  # 4. שמירה בתיק
         db.fill_customer(saved["customer_id"], hint)            # משלימים מייל/שם ממערכת העסק
+        progress("delivering")
         delivery = deliver.send_reports(saved["call_id"], recipients)  # 5. PDF + מייל לכל הלקוחות
     except Exception as e:  # noqa: BLE001 - כל שגיאה נרשמת ביומן ולא מפילה את המערכת
         db.finish_job(job_id, "failed", str(e))
