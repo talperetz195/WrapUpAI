@@ -1220,8 +1220,26 @@ class EnterpriseStore {
       'cust-108': ['ron.kadmi@example.com'],
     };
     for (const c of this.customers) {
-      if (!c.emails && demoEmails[c.id]) c.emails = demoEmails[c.id];
+      if (!c.emails || c.emails.length === 0) c.emails = demoEmails[c.id] || [this.demoEmailFor(c)];
     }
+  }
+
+  /** כתובת דוגמה אוטומטית (@example.com) לכל לקוח בלי מייל - לפי תעתיק השם לאנגלית */
+  public demoEmailFor(c: { id: string; fullName: string }): string {
+    const map: Record<string, string> = {
+      א: 'a', ב: 'b', ג: 'g', ד: 'd', ה: 'h', ו: 'v', ז: 'z', ח: 'ch', ט: 't', י: 'y', כ: 'k', ך: 'k', ל: 'l',
+      מ: 'm', ם: 'm', נ: 'n', ן: 'n', ס: 's', ע: 'a', פ: 'p', ף: 'f', צ: 'tz', ץ: 'tz', ק: 'k', ר: 'r', ש: 'sh', ת: 't',
+    };
+    const local = c.fullName
+      .trim()
+      .split(/\s+/)
+      .map((w) => [...w].map((ch) => map[ch] ?? (/[a-z0-9]/i.test(ch) ? ch.toLowerCase() : '')).join(''))
+      .filter(Boolean)
+      .join('.');
+    const taken = new Set(this.customers.flatMap((x) => (x.id === c.id ? [] : x.emails || [])));
+    let email = `${local || c.id}@example.com`;
+    if (taken.has(email)) email = `${local || 'customer'}.${c.id.replace(/^cust-/, '')}@example.com`;
+    return email;
   }
 
   private safeAudioFilename(recordingId: string): string {

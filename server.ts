@@ -434,6 +434,8 @@ async function startServer(): Promise<void> {
         .map((e) => e.trim())
         .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)),
     };
+    // WrapUpAI: בלי מייל בטופס - כתובת דוגמה אוטומטית
+    if (newCustomer.emails.length === 0) newCustomer.emails = [store.demoEmailFor(newCustomer)];
 
     store.customers.unshift(newCustomer);
 
