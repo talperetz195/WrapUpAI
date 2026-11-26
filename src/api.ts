@@ -44,6 +44,16 @@ export async function loginOperator(passcode: string): Promise<AuthSessionRespon
   return handleJson<AuthSessionResponse>(res);
 }
 
+/** WrapUpAI: עדכון כתובות המייל של לקוח (ריק = כתובת דוגמה אוטומטית) */
+export async function updateCustomerEmails(token: string, customerId: string, emails: string): Promise<SystemSnapshot> {
+  const res = await fetch(`/api/internal/customers/${encodeURIComponent(customerId)}/emails`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ emails }),
+  });
+  return handleJson<SystemSnapshot>(res);
+}
+
 /** WrapUpAI: ה-PDF שהוחזר מהמערכת החיצונית ונשמר בשרת הארגון */
 export async function fetchWrapupPdfBlob(
   token: string,

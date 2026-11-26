@@ -453,6 +453,36 @@ async function startServer(): Promise<void> {
     res.status(201).json({ customerId: id, snapshot });
   });
 
+  // WrapUpAI: עדכון כתובות המייל של לקוח (לשליחת סיכומי שיחה)
+  app.patch('/api/internal/customers/:id/emails', requireOperatorAuth, (req, res) => {
+    const customer = store.customers.find((c) => c.id === req.params.id);
+    if (!customer) {
+      res.status(404).json({ error: 'הלקוח לא נמצא.' });
+      return;
+    }
+    const raw = String((req.body || {}).emails ?? '');
+    const parts = raw.split(/[,;\s]+/).map((e) => e.trim()).filter(Boolean);
+    const invalid = parts.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+    if (invalid.length > 0) {
+      res.status(400).json({ error: `כתובת מייל לא תקינה: ${invalid.join(', ')}` });
+      return;
+    }
+    // ריק = חזרה לכתובת דוגמה אוטומטית
+    customer.emails = parts.length > 0 ? parts : [store.demoEmailFor(customer)];
+    store.addAuditLog({
+      actor: req.operator!.operatorName,
+      system: 'customer_crm',
+      action: 'עדכון כתובות מייל לסיכומי שיחה',
+      resource: customer.fullName,
+      outcome: 'approved',
+      details: `${customer.emails.length} כתובות מייל עודכנו בכרטיס הלקוח.`,
+    });
+    store.save();
+    const snapshot = buildMaskedSnapshot();
+    store.broadcast('state_update', snapshot);
+    res.json(snapshot);
+  });
+
   app.post('/api/internal/customers/:id/reveal-id', requireOperatorAuth, (req, res) => {
     const customer = store.customers.find((c) => c.id === req.params.id);
     if (!customer) {
