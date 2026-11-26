@@ -1,0 +1,6 @@
+{
+  "name": "מוסד תגמולים וביטוח — מרכזיה ותמלול מאובטח",
+  "description": "מערכת דמה ארגונית לניהול מרכזיית שיחות מאובטחת, העברה מבוקרת למערכת תמלול וניתוח חיצונית מרובת משתתפים, הפקת דוחות עסקיים ושיוך משימות ליומן הלקוח.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
