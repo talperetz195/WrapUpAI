@@ -1204,6 +1204,24 @@ class EnterpriseStore {
 
   constructor() {
     this.loadFromDisk();
+    this.applyDemoEmails();
+  }
+
+  /** WrapUpAI: כתובות מייל לדמו (מופנות בפועל לכתובת בדיקה ב-WrapUpAI) */
+  private applyDemoEmails(): void {
+    const demoEmails: Record<string, string[]> = {
+      'cust-101': ['david.mizrahi@example.com'],
+      'cust-102': ['rachel.avraham@example.com'],
+      'cust-103': ['yosef.berkovich@example.com', 'sara.berkovich@example.com'],
+      'cust-104': ['amir.hasson@example.com'],
+      'cust-105': ['liron.bendavid@example.com'],
+      'cust-106': ['itay.shapira@example.com'],
+      'cust-107': ['maya.friedman@example.com'],
+      'cust-108': ['ron.kadmi@example.com'],
+    };
+    for (const c of this.customers) {
+      if (!c.emails && demoEmails[c.id]) c.emails = demoEmails[c.id];
+    }
   }
 
   private safeAudioFilename(recordingId: string): string {

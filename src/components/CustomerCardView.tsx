@@ -18,7 +18,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { createCustomer, revealCustomerId } from '../api';
+import { createCustomer, fetchWrapupPdfBlob, revealCustomerId } from '../api';
 import { INSTITUTIONAL_DEPARTMENTS } from '../constants';
 import type { CalendarEvent, CallAnalysisReport, CustomerRecord, SystemSnapshot, TaskPriority } from '../types';
 
@@ -348,6 +348,22 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                          {activeReport.wrapup?.pdfFileName && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const blob = await fetchWrapupPdfBlob(token, activeReport.id);
+                                  window.open(URL.createObjectURL(blob), '_blank');
+                                } catch (err) {
+                                  alert(err instanceof Error ? err.message : 'שגיאה בפתיחת ה-PDF');
+                                }
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors whitespace-nowrap"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>PDF מ-WrapUpAI</span>
+                            </button>
+                          )}
                           <button
                             onClick={() => onOpenPdf(activeReport.id)}
                             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-[#0F2942] hover:bg-slate-800 text-white rounded-lg transition-colors whitespace-nowrap"
@@ -376,6 +392,13 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                         <div className="text-xs font-semibold text-slate-500 mb-1">סיכום מנהלים</div>
                         {activeReport.executiveSummary}
                       </div>
+
+                      {activeReport.wrapup && (
+                        <div className="text-xs text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5">
+                          <span className="font-bold tracking-wide">WRAPUP AI · </span>
+                          {activeReport.wrapup.delivery}
+                        </div>
+                      )}
 
                       <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
                         <Users className="w-4 h-4 text-slate-400 shrink-0" />

@@ -27,6 +27,8 @@ export interface CustomerRecord {
   department: string;
   assignedHandler: string;
   caseStatus: string;
+  /** כתובות מייל לשליחת סיכום השיחה (WrapUpAI). בני זוג = כמה כתובות */
+  emails?: string[];
 }
 
 export interface PbxRecording {
@@ -82,8 +84,16 @@ export interface TranscriptLine {
   text: string;
 }
 
+export interface WrapUpDelivery {
+  delivery: string;
+  sentTo: string[];
+  pdfFileName?: string | null;
+}
+
 export interface CallAnalysisReport {
   id: string;
+  /** נתוני מסירה מ-WrapUpAI: מייל ללקוחות + PDF שנשמר בשרת הארגון */
+  wrapup?: WrapUpDelivery;
   jobId: string;
   recordingId: string;
   uniqueCallName: string;

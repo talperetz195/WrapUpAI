@@ -44,6 +44,18 @@ export async function loginOperator(passcode: string): Promise<AuthSessionRespon
   return handleJson<AuthSessionResponse>(res);
 }
 
+/** WrapUpAI: ה-PDF שהוחזר מהמערכת החיצונית ונשמר בשרת הארגון */
+export async function fetchWrapupPdfBlob(token: string, reportId: string): Promise<Blob> {
+  const res = await fetch(`/api/internal/reports/${encodeURIComponent(reportId)}/wrapup-pdf`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error || 'שגיאה בטעינת ה-PDF של WrapUpAI.');
+  }
+  return res.blob();
+}
+
 export async function fetchBootstrap(token: string): Promise<SystemSnapshot> {
   const res = await fetch('/api/internal/bootstrap', {
     headers: { Authorization: `Bearer ${token}` },

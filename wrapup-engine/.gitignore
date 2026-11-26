@@ -1,0 +1,12 @@
+.env
+.venv/
+data.db
+outbox/
+recordings/
+*.log
+__pycache__/
+gmail_credentials.json
+gmail_token.json
+mock_crm/crm.db
+mock_crm/storage/
+mock_crm/pool/

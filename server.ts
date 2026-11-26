@@ -203,7 +203,16 @@ async function executeIsolatedExternalAnalysis(params: {
 
   try {
     // Call isolated System B HTTP endpoint over localhost boundary using ONLY the scoped single-use token
-    const response = await fetch(`http://127.0.0.1:${internalPort}/api/external/analyze`, {
+    // WrapUpAI: אם מוגדר EXTERNAL_ANALYTICS_URL - האודיו נשלח למערכת WrapUpAI החיצונית האמיתית
+    const externalUrl = process.env.EXTERNAL_ANALYTICS_URL || `http://127.0.0.1:${internalPort}/api/external/analyze`;
+    const rec = store.recordings.find((r) => r.id === job.recordingId);
+    const customer = rec ? store.customers.find((c) => c.id === rec.customerId) : undefined;
+    // רק לצורך מסירת הסיכום במייל - WrapUpAI לא שולח את זה למודל ה-AI
+    const deliveryRecipients = (customer?.emails || []).map((email) => ({
+      name: customer?.fullName || '',
+      email,
+    }));
+    const response = await fetch(externalUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -216,6 +225,7 @@ async function executeIsolatedExternalAnalysis(params: {
         anonymizedParticipants: job.maskedPayload.anonymizedParticipants,
         audioBase64: audioBuffer.toString('base64'),
         mimeType,
+        deliveryRecipients,
       }),
     });
 
@@ -739,7 +749,8 @@ async function startServer(): Promise<void> {
       return;
     }
 
-    const { jobId, analysis } = req.body as {
+    const { jobId, analysis, wrapup } = req.body as {
+      wrapup?: { delivery: string; sentTo: string[]; pdfFileName?: string | null; pdfBase64?: string | null };
       jobId: string;
       analysis: {
         executiveSummary: string;
@@ -779,6 +790,18 @@ async function startServer(): Promise<void> {
       transcript: analysis.transcript,
     };
 
+    // WrapUpAI: שמירת קובץ ה-PDF שהוחזר בשרת הארגון + פרטי המסירה במייל
+    if (wrapup) {
+      let pdfFileName: string | null = null;
+      if (wrapup.pdfBase64 && wrapup.pdfFileName) {
+        const dir = path.resolve(process.cwd(), '.local-data', 'wrapup-pdfs');
+        fs.mkdirSync(dir, { recursive: true });
+        pdfFileName = `${reportId}.pdf`;
+        fs.writeFileSync(path.join(dir, pdfFileName), Buffer.from(wrapup.pdfBase64, 'base64'));
+      }
+      report.wrapup = { delivery: wrapup.delivery, sentTo: wrapup.sentTo || [], pdfFileName: wrapup.pdfFileName || pdfFileName };
+    }
+
     // Replace older report for the same recording if re-analyzed, otherwise prepend
     store.reports = [report, ...store.reports.filter((r) => r.recordingId !== rec.id)];
     rec.status = 'report_returned';
@@ -800,7 +823,7 @@ async function startServer(): Promise<void> {
     store.pushNotification({
       type: 'report_returned',
       title: `התקבל דוח תמלול וניתוח חדש עבור ${customer.fullName}`,
-      message: `השיחה ${rec.uniqueCallName} נותחה (${report.topics.length} נושאים, ${report.actionItems.length} משימות להמשך) ושויכה לכרטיס הלקוח.`,
+      message: `השיחה ${rec.uniqueCallName} נותחה (${report.topics.length} נושאים, ${report.actionItems.length} משימות להמשך) ושויכה לכרטיס הלקוח.${report.wrapup?.sentTo.length ? ` סיכום ו-PDF נשלחו במייל ל-${report.wrapup.sentTo.length} לקוחות.` : ''}`,
       customerId: customer.id,
       customerName: customer.fullName,
       recordingId: rec.id,
@@ -810,6 +833,19 @@ async function startServer(): Promise<void> {
 
     store.broadcast('state_update', buildMaskedSnapshot());
     res.json({ ok: true, reportId });
+  });
+
+  // WrapUpAI: הורדת ה-PDF שהוחזר מהמערכת החיצונית ונשמר בשרת הארגון
+  app.get('/api/internal/reports/:reportId/wrapup-pdf', requireOperatorAuth, (req, res) => {
+    const report = store.reports.find((r) => r.id === req.params.reportId);
+    const file = path.resolve(process.cwd(), '.local-data', 'wrapup-pdfs', `${String(req.params.reportId).replace(/[^A-Z0-9-]/gi, '')}.pdf`);
+    if (!report || !fs.existsSync(file)) {
+      res.status(404).json({ error: 'קובץ ה-PDF של WrapUpAI לא נמצא.' });
+      return;
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(fs.readFileSync(file));
   });
 
   // ADD INDIVIDUAL TASK TO CUSTOMER CALENDAR

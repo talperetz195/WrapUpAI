@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>בנק השרון - מערכת מוקד</title>
+<style>
+  :root { --navy: #0b2a4a; --gold: #c9a227; --bg: #eef1f5; --card: #fff; --text: #1b2433; --muted: #6a7486; --border: #dde2ea; --bad: #c62828; --ok: #2e7d32; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, Arial, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--navy); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 14px; }
+  header .logo { width: 34px; height: 34px; border-radius: 8px; background: var(--gold); display: grid; place-items: center; font-weight: 800; color: var(--navy); }
+  header h1 { font-size: 18px; margin: 0; } header small { opacity: .7; }
+  .wrap { max-width: 1100px; margin: 20px auto; padding: 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 16px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  select, button { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); }
+  button { background: var(--navy); color: #fff; border: 0; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: right; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 14px; }
+  th { color: var(--muted); font-weight: 600; }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+  .new { background: #fff4d6; color: #8a5a00; } .processed { background: #e3f4e6; color: var(--ok); } .failed { background: #fde8e7; color: var(--bad); }
+  .wrapup { margin-top: 8px; border-inline-start: 4px solid #5b4cf0; background: #f6f5ff; border-radius: 8px; padding: 10px 12px; }
+  .wrapup .by { font-size: 11px; color: #5b4cf0; font-weight: 700; letter-spacing: .3px; }
+  .guard { background: #fde8e7; color: #7a1610; border-radius: 6px; padding: 6px 8px; margin-top: 6px; font-size: 13px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  a { color: #3b3fd8; }
+  a.doc { display: inline-block; background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 13px; text-decoration: none; }
+  .pulse { animation: pulse 1.2s infinite; } @keyframes pulse { 50% { opacity: .4; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">ש</div>
+  <div><h1>בנק השרון · מערכת מוקד שירות</h1><small>מערכת פנימית · הקלטות שיחות ותיקי לקוחות</small></div>
+</header>
+<div class="wrap">
+  <div class="card">
+    <h2>📞 סימולציית מוקד</h2>
+    <div class="row">
+      <select id="pool"></select>
+      <button onclick="simulate()">סיום שיחה ← המרכזייה שומרת הקלטה</button>
+      <span id="sim-msg" class="muted"></span>
+    </div>
+    <p class="muted">בעולם האמיתי זה קורה לבד בכל סוף שיחה. WrapUpAI מחובר מבחוץ דרך API עם הרשאה לקריאת הקלטות וכתיבת סיכום בלבד.</p>
+  </div>
+
+  <div class="card">
+    <h2>🎙️ הקלטות שיחות אחרונות</h2>
+    <table>
+      <thead><tr><th>#</th><th>לקוח</th><th>מועד</th><th>סטטוס</th><th>סיכום בתיק</th></tr></thead>
+      <tbody id="recs"></tbody>
+    </table>
+  </div>
+</div>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const STATUS = { new: ["new pulse", "⏳ ממתין ל-WrapUpAI"], processed: ["processed", "✅ סוכם ע\"י WrapUpAI"], failed: ["failed", "❌ נכשל"] };
+
+async function loadPool() {
+  const files = await (await fetch("/ui/pool")).json();
+  document.getElementById("pool").innerHTML = files.map(f => `<option>${esc(f)}</option>`).join("");
+}
+async function simulate() {
+  const pool_file = document.getElementById("pool").value;
+  await fetch("/ui/simulate-call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pool_file }) });
+  document.getElementById("sim-msg").textContent = "✔ ההקלטה נשמרה בשרת הבנק";
+  setTimeout(() => (document.getElementById("sim-msg").textContent = ""), 3000);
+  load();
+}
+function docsHtml(docs) {
+  return (docs || []).map(d => `<a class="doc" href="${esc(d.url)}" target="_blank">📄 ${esc(d.name)}</a>`).join(" ");
+}
+function wrapupHtml(w, docs) {
+  if (!w || !w.summary) return w && w.error ? `<div class="guard">${esc(w.error)}</div>` : "";
+  const guard = (w.policy_conflicts || []).map(p => `<div class="guard">🛡️ הנציג אמר "${esc(p.rep_statement)}" אבל בתקנון: "${esc(p.policy_text)}"</div>`).join("");
+  const churn = w.churn_risk >= 60 ? `<div class="guard">🚨 סיכון נטישה ${w.churn_risk}%: ${esc(w.churn_reason)}</div>` : "";
+  const nm = w.next_meeting ? `<div class="muted">📅 פגישה הבאה: ${esc(w.next_meeting.title)} ${esc(w.next_meeting.date || "")} ${esc(w.next_meeting.time || "")}</div>` : "";
+  return `<div class="wrapup"><div class="by">WRAPUP AI</div>
+    <b>${esc(w.title)}</b><div>${esc(w.summary)}</div>${guard}${churn}${nm}
+    ${docs && docs.length ? `<div style="margin-top:6px">🗂️ נשמר בתיק: ${docsHtml(docs)}</div>` : ""}
+    ${w.business_tasks.length ? `<div class="muted">לטיפול הבנק: ${w.business_tasks.map(esc).join(" · ")}</div>` : ""}
+    <div class="muted">📩 ${esc(w.delivery)} ·
+      <a href="${esc(w.customer_report_url)}" target="_blank">דוח ללקוח</a> ·
+      <a href="${esc(w.business_report_url)}" target="_blank">דוח לבנק</a> ·
+      </div></div>`;
+}
+async function load() {
+  const recs = await (await fetch("/ui/recordings")).json();
+  document.getElementById("recs").innerHTML = recs.map(r => `<tr>
+    <td>${r.id}</td><td><b>${esc(r.name || "לא מזוהה")}</b><div class="muted">${esc(r.phone || "")}<br>${esc(r.email || "")}</div></td>
+    <td class="muted">${esc(r.created_at)}<br>${esc(r.filename)}</td>
+    <td><span class="pill ${STATUS[r.status][0]}">${STATUS[r.status][1]}</span></td>
+    <td>${wrapupHtml(r.wrapup, r.documents)}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">אין הקלטות עדיין</td></tr>`;
+}
+loadPool(); load(); setInterval(load, 2500);
+</script>
+</body>
+</html>

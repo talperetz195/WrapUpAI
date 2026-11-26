@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+anthropic
+pydantic
+python-dotenv
+python-multipart
+requests
+openai
+google-api-python-client
+google-auth-oauthlib
