@@ -213,7 +213,8 @@ def _run_job(body: dict) -> None:
             path = Path(tmp) / f"{body['uniqueCallName']}{ext}"
             path.write_bytes(base64.b64decode(body["audioBase64"]))
             # שם הלקוח מגיע רק לצורך המסירה (שם ה-PDF והפנייה במייל) - לא נשלח למודל ה-AI
-            hint = {"name": recipients[0][0]} if recipients and recipients[0][0] else {}
+            name = body.get("deliveryCustomerName") or (recipients[0][0] if recipients else "")
+            hint = {"name": name} if name else {}
             result = process_file(path, source="api:מרכזיית הצוות", display_name=path.name,
                                   customer_hint=hint, recipients=recipients,
                                   on_progress=lambda st: _status(job_id, TEAM_STAGE[st]))

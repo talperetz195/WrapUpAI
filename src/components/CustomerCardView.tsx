@@ -78,6 +78,7 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
   const [newFullName, setNewFullName] = useState('');
   const [newNationalId, setNewNationalId] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [newEmails, setNewEmails] = useState('');
   const [newCity, setNewCity] = useState('תל אביב-יפו');
   const [newBranch, setNewBranch] = useState('סניף תל אביב מרכז');
   const [newDepartment, setNewDepartment] = useState('אבטלה והבטחת הכנסה');
@@ -150,6 +151,7 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
         fullName: newFullName,
         nationalId: newNationalId,
         phone: newPhone,
+        emails: newEmails,
         city: newCity,
         branch: newBranch,
         department: newDepartment,
@@ -161,6 +163,7 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
       setNewFullName('');
       setNewNationalId('');
       setNewPhone('');
+      setNewEmails('');
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'שגיאה בפתיחת כרטיס הלקוח.');
     } finally {
@@ -760,6 +763,20 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                     value={newPhone}
                     onChange={(e) => setNewPhone(e.target.value)}
                     placeholder="050-0000000"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    דוא״ל לסיכומי שיחה (WrapUpAI) · אפשר כמה, מופרדים בפסיק
+                  </label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={newEmails}
+                    onChange={(e) => setNewEmails(e.target.value)}
+                    placeholder="name@example.com, partner@example.com"
                     className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>

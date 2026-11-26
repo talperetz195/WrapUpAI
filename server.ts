@@ -233,6 +233,8 @@ async function executeIsolatedExternalAnalysis(params: {
         audioBase64: audioBuffer.toString('base64'),
         mimeType,
         deliveryRecipients,
+        // שם הלקוח לפנייה במייל ולשם קובץ ה-PDF בלבד (לא נשלח למודל ה-AI)
+        deliveryCustomerName: customer?.fullName || '',
       }),
     });
 
@@ -385,7 +387,9 @@ async function startServer(): Promise<void> {
       department,
       assignedHandler,
       caseStatus,
+      emails,
     } = (req.body || {}) as {
+      emails?: string;
       fullName?: string;
       nationalId?: string;
       phone?: string;
@@ -424,6 +428,11 @@ async function startServer(): Promise<void> {
       department: department?.trim() || 'אבטלה והבטחת הכנסה',
       assignedHandler: assignedHandler?.trim() || req.operator!.operatorName,
       caseStatus: caseStatus?.trim() || 'תיק חדש · ממתין להקלטה או תביעה',
+      // WrapUpAI: כתובות מייל לשליחת סיכומי שיחה (אפשר כמה, מופרדות בפסיק)
+      emails: (emails || '')
+        .split(/[,;\s]+/)
+        .map((e) => e.trim())
+        .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)),
     };
 
     store.customers.unshift(newCustomer);

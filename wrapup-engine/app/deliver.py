@@ -275,12 +275,16 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
     test_to = [x.strip() for x in os.getenv("EMAIL_TEST_RECIPIENT", "").split(",") if x.strip()]
     business_to = [x.strip() for x in os.getenv("BUSINESS_EMAIL", "").split(",") if x.strip()]
     sent_to, failed = [], []
+    if not people and test_to:
+        # מצב דמו: ללקוח אין מייל בתיק - שולחים את הסיכום ללקוח לכתובות הדמו, כדי שיהיה אפשר לראות אותו
+        people = [(call["customer"].get("name") or "", "")]
     for name, email in people:
-        subject = f"סיכום השיחה שלך עם {business_name()}" + (f" [דמו - במקור ל: {email}]" if test_to else "")
+        subject = f"סיכום השיחה שלך עם {business_name()}" + (
+            f" [דמו - במקור ל: {email or 'ללקוח אין מייל בתיק'}]" if test_to else "")
         try:
             for to in test_to or [email]:
                 _send(to, subject, customer_report(call, name), pdfs["customer"])
-            sent_to.append(email)
+            sent_to.append(email or f"{name or 'לקוח'} (דמו - אין מייל בתיק)")
         except Exception as e:  # noqa: BLE001
             failed.append(f"{email}: {e}")
     biz_sent = []

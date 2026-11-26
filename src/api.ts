@@ -89,6 +89,7 @@ export async function createCustomer(
     department: string;
     assignedHandler: string;
     caseStatus: string;
+    emails?: string;
   }
 ): Promise<{ customerId: string; snapshot: SystemSnapshot }> {
   const res = await fetch('/api/internal/customers', {
