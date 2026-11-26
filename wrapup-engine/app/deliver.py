@@ -271,22 +271,27 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
         notes.append(f"מייל לא מוגדר ({len(people)} נמענים ממתינים)")
         return {"text": " · ".join(notes), "pdfs": pdfs, "sent_to": []}
 
-    test_to = os.getenv("EMAIL_TEST_RECIPIENT")
+    # אפשר כמה כתובות, מופרדות בפסיק
+    test_to = [x.strip() for x in os.getenv("EMAIL_TEST_RECIPIENT", "").split(",") if x.strip()]
+    business_to = [x.strip() for x in os.getenv("BUSINESS_EMAIL", "").split(",") if x.strip()]
     sent_to, failed = [], []
     for name, email in people:
-        to = test_to or email
         subject = f"סיכום השיחה שלך עם {business_name()}" + (f" [דמו - במקור ל: {email}]" if test_to else "")
         try:
-            _send(to, subject, customer_report(call, name), pdfs["customer"])
+            for to in test_to or [email]:
+                _send(to, subject, customer_report(call, name), pdfs["customer"])
             sent_to.append(email)
         except Exception as e:  # noqa: BLE001
             failed.append(f"{email}: {e}")
-    if os.getenv("BUSINESS_EMAIL"):
+    biz_sent = []
+    for to in business_to:
         try:
-            _send(os.environ["BUSINESS_EMAIL"], f"דוח שיחה: {call['customer'].get('name')}", biz_html, pdfs["business"])
-            notes.append("נשלח לעסק")
+            _send(to, f"סיכום פגישה ותחושות לקוח: {call['customer'].get('name')}", biz_html, pdfs["business"])
+            biz_sent.append(to)
         except Exception as e:  # noqa: BLE001
-            failed.append(f"עסק: {e}")
+            failed.append(f"עסק {to}: {e}")
+    if biz_sent:
+        notes.append(f"דוח לעסק נשלח ל-{len(biz_sent)} כתובות")
 
     via = "Gmail API" if mode == "gmail-api" else "SMTP"
     if sent_to:

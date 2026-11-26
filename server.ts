@@ -16,6 +16,7 @@ import {
   type OperatorSessionPayload,
 } from './server/security.ts';
 import { store } from './server/store.ts';
+import { isAzureTtsConfigured, synthesizeDialogueWithAzure } from './server/azureTts.ts';
 import type { CallAnalysisReport, DialogueTurn, ExternalTransferPayload, PbxRecording, TransferJob } from './server/types.ts';
 
 const PORT = 3000;
@@ -185,7 +186,13 @@ async function ensureRecordingAudio(recordingId: string): Promise<{ buffer: Buff
     throw new Error('לקובץ זה אין שמע שמור במטמון.');
   }
 
-  const synthesized = await synthesizeMultiSpeakerCallWav(rec.dialogueScript);
+  // WrapUpAI: בלי מפתח Gemini - יוצרים את השמע עם Azure Speech (קולות עבריים)
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const geminiConfigured = Boolean(geminiKey && geminiKey !== 'MY_GEMINI_API_KEY');
+  const synthesized =
+    !geminiConfigured && isAzureTtsConfigured()
+      ? await synthesizeDialogueWithAzure(rec.dialogueScript)
+      : await synthesizeMultiSpeakerCallWav(rec.dialogueScript);
   rec.durationSeconds = synthesized.durationSeconds;
   rec.mimeType = synthesized.mimeType;
   store.setAudio(recordingId, synthesized.buffer, synthesized.mimeType);

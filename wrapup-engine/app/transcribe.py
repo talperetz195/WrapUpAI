@@ -39,7 +39,7 @@ def _call_azure(audio: bytes, filename: str, diarization: bool, phrases: list[st
     endpoint = os.environ["AZURE_SPEECH_ENDPOINT"].rstrip("/")
     definition = {"locales": ["he-IL"], "profanityFilterMode": "None"}
     if diarization:
-        definition["diarization"] = {"enabled": True, "maxSpeakers": 2}
+        definition["diarization"] = {"enabled": True, "maxSpeakers": 4}
     if phrases:
         definition["phraseList"] = {"phrases": phrases[:500]}
 
