@@ -1,0 +1,121 @@
+"""
+המבנה שה-AI חייב להחזיר. Claude מקבל את המבנה הזה ומחזיר JSON שתואם אותו בדיוק.
+רוצות להוסיף שדה? מוסיפים כאן - וזהו.
+"""
+from typing import Literal, Optional
+from pydantic import BaseModel, Field
+
+CallCategory = Literal[
+    "billing",           # חיוב / חשבון
+    "payment_arrangement",  # הסדר / פריסת תשלומים
+    "technical_support", # תמיכה טכנית
+    "complaint",         # תלונה
+    "account_change",    # שינוי פרטים / מסלול
+    "cancellation",      # ביטול
+    "sales",             # מכירה / הצעה
+    "appointment",       # קביעת תור
+    "information",       # בירור מידע
+    "other",
+]
+
+
+class CustomerDetails(BaseModel):
+    name: Optional[str] = Field(description="שם הלקוח אם נאמר, אחרת null")
+    phone: Optional[str] = Field(description="טלפון הלקוח אם נאמר, ספרות בלבד, אחרת null")
+    customer_number: Optional[str] = Field(description="מספר לקוח / חשבון / פוליסה אם נאמר, אחרת null")
+    email: Optional[str] = Field(description="כתובת מייל של הלקוח אם נאמרה, אחרת null")
+
+
+class NextMeeting(BaseModel):
+    """הפגישה / שיחת ההמשך הבאה שנקבעה בשיחה."""
+    title: str = Field(description="כותרת קצרה לאירוע ביומן, למשל: 'שיחה עם רועי - קרן השתלמות'")
+    date: Optional[str] = Field(description="YYYY-MM-DD אם נקבע או נובע מהשיחה, אחרת null")
+    time: Optional[str] = Field(description="HH:MM (24 שעות) אם נקבעה שעה, אחרת null")
+    with_whom: Optional[str] = Field(description="עם מי הפגישה (שם הנציג/הסוכן/המחלקה), אחרת null")
+    location: Optional[str] = Field(description="'שיחה טלפונית', כתובת סניף וכו', אחרת null")
+
+
+class ActionItem(BaseModel):
+    description: str = Field(description="משימה ברורה ומעשית, בגוף שני ללקוח או בגוף שלישי לעסק")
+    owner: Literal["customer", "business"]
+    category: Literal["appointment", "documents", "payment", "call_back", "visit", "other"]
+    due_date: Optional[str] = Field(description="תאריך יעד בפורמט YYYY-MM-DD אם נאמר או נובע מהשיחה, אחרת null")
+
+
+class Payment(BaseModel):
+    description: str
+    amount: Optional[float]
+    currency: str = Field(description="ILS כברירת מחדל")
+    recurring: bool = Field(description="האם תשלום חוזר (חודשי וכו')")
+
+
+class GlossaryTerm(BaseModel):
+    term: str
+    explanation: str = Field(description="הסבר פשוט בשפה יומיומית, משפט אחד או שניים")
+
+
+class RiskFlag(BaseModel):
+    description: str
+    severity: Literal["low", "medium", "high"]
+
+
+class PolicyConflict(BaseModel):
+    """Policy Guard: הבטחה של הנציג שסותרת את התקנון/הפוליסה של העסק."""
+    rep_statement: str = Field(description="ציטוט מדויק של מה שהנציג אמר")
+    policy_text: str = Field(description="ציטוט מדויק מהתקנון/הפוליסה שסותר את זה")
+    explanation: str = Field(description="הסבר קצר ופשוט: מה הפער ומה המשמעות ללקוח")
+    at_risk: Literal["customer", "business"] = Field(
+        description="customer = הלקוח עלול להיפגע (למשל ישלם דמי ביטול שלא ציפה להם); business = העסק חשוף לתביעה"
+    )
+    severity: Literal["low", "medium", "high"]
+
+
+Emotion = Literal["calm", "understanding", "satisfied", "confused", "stressed", "frustrated", "angry"]
+
+
+class EmotionPoint(BaseModel):
+    stage: Literal["opening", "middle", "closing"]
+    emotion: Emotion
+    evidence: str = Field(description="ציטוט קצר מהלקוח שמראה את הרגש")
+
+
+class SpeakerRole(BaseModel):
+    label: str = Field(description="התווית כפי שמופיעה בתמלול, למשל 'דובר 1'")
+    role: str = Field(description="תפקיד בשיחה: 'נציג שירות', 'לקוח', 'בן/בת זוג של הלקוח', 'סוכן' וכו'")
+
+
+class CallAnalysis(BaseModel):
+    speakers: list[SpeakerRole] = Field(description="מי כל דובר בתמלול")
+    customer: CustomerDetails
+    additional_customers: list[CustomerDetails] = Field(
+        description="לקוחות נוספים שהשתתפו בשיחה (למשל בני זוג בחשבון משותף, שותפים). ריק אם יש רק לקוח אחד"
+    )
+    category: CallCategory
+    title: str = Field(description="כותרת קצרה לשיחה, עד 8 מילים")
+    summary: str = Field(description="סיכום מקצועי לתיק הלקוח אצל העסק, 2-4 משפטים")
+    customer_message: str = Field(
+        description="הודעה מוכנה לשליחה ללקוח: פנייה אישית, מה סוכם, מה עליו לעשות ומתי. שפה פשוטה וחמה."
+    )
+    action_items: list[ActionItem] = Field(description="כל מה שמישהו צריך לעשות אחרי השיחה")
+    business_commitments: list[ActionItem] = Field(
+        description="הבטחות שהעסק/הנציג נתן ללקוח (owner=business), כדי שאפשר יהיה לעקוב שקוימו"
+    )
+    payments: list[Payment]
+    glossary: list[GlossaryTerm] = Field(description="מונחים מקצועיים שהוזכרו והלקוח עלול לא להבין")
+    next_meeting: Optional[NextMeeting] = Field(
+        description="אם נקבעה פגישה/שיחת המשך/תור - הפרטים שלה. null אם לא נקבע כלום"
+    )
+    follow_up_needed: bool
+    follow_up_questions: list[str] = Field(description="אם צריך שיחת המשך: שאלות שהלקוח כדאי שישאל")
+    risk_flags: list[RiskFlag] = Field(
+        description="סימני אזהרה: בקשה לסיסמה/קוד, לחץ להעביר כסף מיד, אי-התאמות, הבטחות לא ריאליות"
+    )
+    policy_conflicts: list[PolicyConflict] = Field(
+        description="Policy Guard: כל הבטחה/טענה של הנציג שסותרת את תקנון העסק. רשימה ריקה אם אין סתירה או אין תקנון"
+    )
+    emotion_map: list[EmotionPoint] = Field(description="רגש הלקוח לאורך השיחה: פתיחה, אמצע, סיום")
+    customer_end_emotion: Emotion = Field(description="איך הלקוח הרגיש בסוף השיחה")
+    churn_risk: int = Field(description="סיכון נטישה 0-100: עד כמה סביר שהלקוח יעזוב בעקבות השיחה")
+    churn_reason: str = Field(description="משפט אחד: למה זה הסיכון")
+    sentiment: Literal["positive", "neutral", "negative"]
+    status: Literal["resolved", "pending_customer", "pending_business", "needs_follow_up"]

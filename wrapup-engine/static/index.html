@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WrapUpAI</title>
+<style>
+  :root {
+    --bg: #f5f6fa; --card: #fff; --text: #1d2433; --muted: #6b7385; --border: #e3e6ee;
+    --accent: #4f46e5; --accent-soft: #eef0ff; --ok: #0f9d58; --warn: #e8a100; --bad: #d93025;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--card); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 18px; margin: 0; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+  .badge.demo { background: #fff4d6; color: #8a5a00; }
+  .layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; padding: 16px; max-width: 1300px; margin: auto; }
+  @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 12px; }
+  .card h3 { font-size: 14px; margin: 16px 0 8px; color: var(--muted); }
+  .cust { padding: 10px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+  .cust:hover { background: var(--bg); }
+  .cust.active { background: var(--accent-soft); border-color: var(--accent); }
+  .cust small { color: var(--muted); display: block; }
+  textarea, input, select { width: 100%; font: inherit; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+  textarea { min-height: 120px; resize: vertical; }
+  button { font: inherit; padding: 8px 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+  button:disabled { opacity: .5; cursor: wait; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 140px; }
+  .task { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+  .task input { width: auto; margin-top: 4px; }
+  .task.done span { text-decoration: line-through; color: var(--muted); }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--bg); color: var(--muted); margin-inline-start: 4px; white-space: nowrap; }
+  .tag.due { background: #fff4d6; color: #8a5a00; }
+  .risk { background: #fde8e7; color: var(--bad); padding: 8px 12px; border-radius: 8px; margin: 4px 0; }
+  .risk.low { background: #fff4d6; color: #8a5a00; }
+  .msg { background: #e7f6ee; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+  .call { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .call summary { cursor: pointer; font-weight: 600; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .error { background: #fde8e7; color: var(--bad); padding: 8px 12px; border-radius: 8px; }
+  dl { margin: 0; } dt { font-weight: 600; } dd { margin: 0 0 8px; color: var(--muted); }
+  .guard { background: #fde8e7; border: 2px solid var(--bad); color: #7a1610; padding: 12px; border-radius: 10px; margin: 8px 0; }
+  .conflict { background: #fff; border-radius: 8px; padding: 8px 10px; margin-top: 8px; color: var(--text); }
+  .emo { background: var(--bg); border-radius: 8px; padding: 8px; text-align: center; }
+  .meter { height: 8px; background: var(--bg); border-radius: 99px; overflow: hidden; margin: 10px 0 4px; }
+  .meter div { height: 100%; }
+  pre { white-space: pre-wrap; font-family: inherit; background: var(--bg); padding: 8px; border-radius: 8px; max-height: 300px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 WrapUpAI</h1>
+  <span id="mode" class="badge">...</span>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="card">
+      <h2>תיקי לקוחות</h2>
+      <div id="customers" class="muted">טוען...</div>
+    </div>
+    <div class="card">
+      <h2>📖 מילון העסק</h2>
+      <div id="glossary"></div>
+      <input id="g-term" placeholder="מונח (למשל: ריבית פריים)">
+      <input id="g-expl" placeholder="הסבר פשוט" style="margin-top:6px">
+      <button class="secondary" style="margin-top:6px;width:100%" onclick="addTerm()">הוספה</button>
+    </div>
+    <div class="card">
+      <h2>🛡️ תקנון / תנאי פוליסה</h2>
+      <p class="muted">Policy Guard משווה כל הבטחה של הנציג מול התקנון הזה ומתריע על סתירות.</p>
+      <textarea id="policy" placeholder="הדביקו כאן את התקנון, תנאי הביטול, העמלות..."></textarea>
+      <button class="secondary" style="margin-top:6px;width:100%" onclick="savePolicy(this)">שמירת תקנון</button>
+    </div>
+  </aside>
+
+  <main>
+    <div class="card">
+      <h2>🔌 מערכות מחוברות</h2>
+      <div id="connectors" class="muted">אין מערכות מחוברות</div>
+      <p class="muted">WrapUpAI מושך אוטומטית הקלטות חדשות מכל מערכת מחוברת (API מאובטח, הרשאה לקריאת הקלטות וכתיבת סיכום בלבד), ומחזיר אליה את הסיכום. גם תיקייה מקומית במעקב: <code id="rec-dir"></code></p>
+    </div>
+
+    <div class="card">
+      <h2>📡 שיחות שעובדו <span id="live-dot" class="tag">● פעיל</span></h2>
+      <div id="jobs" class="muted">ממתין להקלטות...</div>
+    </div>
+
+    <div class="card">
+      <h2>העלאה ידנית</h2>
+      <p class="muted">קובץ שמע (wav, mp3...), קובץ תמלול (.txt), או הדבקת טקסט. אותו תהליך בדיוק כמו בהקלטות מהמרכזייה.</p>
+      <input type="file" id="file" accept=".txt,.wav,.mp3,.ogg,.opus,.flac,.m4a,.aac,.amr,.webm,.wma,audio/*,text/plain">
+      <textarea id="text" placeholder="...או הדביקי כאן את תמלול השיחה" style="margin-top:8px"></textarea>
+      <div class="row">
+        <select id="customer-select"><option value="">🔍 זיהוי לקוח אוטומטי מהשיחה</option></select>
+        <button id="submit" onclick="submitCall()">נתח ושמור בתיק</button>
+      </div>
+      <div id="submit-msg" style="margin-top:8px"></div>
+    </div>
+
+    <div id="file-view"></div>
+  </main>
+</div>
+
+<script>
+const CATEGORIES = { billing: "חיוב", payment_arrangement: "הסדר תשלומים", technical_support: "תמיכה טכנית",
+  complaint: "תלונה", account_change: "שינוי פרטים", cancellation: "ביטול", sales: "מכירה",
+  appointment: "קביעת תור", information: "בירור מידע", other: "אחר" };
+const STATUS = { resolved: "✅ נסגר", pending_customer: "⏳ ממתין ללקוח", pending_business: "⏳ ממתין לעסק", needs_follow_up: "🔁 נדרשת שיחת המשך" };
+const SENTIMENT = { positive: "🙂", neutral: "😐", negative: "🙁" };
+const TASK_CAT = { appointment: "תור", documents: "מסמכים", payment: "תשלום", call_back: "חזרה טלפונית", visit: "הגעה פיזית", other: "אחר" };
+
+let currentCustomer = null;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `שגיאה ${res.status}`);
+  return data;
+}
+
+async function loadStatus() {
+  const s = await api("/api/status");
+  const el = document.getElementById("mode");
+  el.textContent = (s.mode === "demo" ? "ניתוח: מצב דמו" : `ניתוח: ${s.mode} · ${s.model}`)
+    + (s.speech ? " · תמלול: Azure Speech" : " · תמלול: לא מוגדר (רק .txt)");
+  el.className = "badge" + (s.mode === "demo" || !s.speech ? " demo" : "");
+  document.getElementById("rec-dir").textContent = s.recordings_dir;
+  document.getElementById("connectors").innerHTML = s.connectors.length ? s.connectors.map(c => `
+    <div class="task"><span><b>🏦 ${esc(c.name)}</b> <span class="tag">${esc(c.status)}</span>
+      <span class="muted"> · ${esc(c.url)} · סנכרון אחרון ${esc(c.last_sync || "-")} · ${c.processed} שיחות סוכמו</span></span></div>`).join("")
+    : "אין מערכות מחוברות";
+}
+setInterval(loadStatus, 4000);
+
+const JOB_ICON = { processing: "⏳", done: "✅", failed: "❌" };
+let lastJobsKey = "";
+async function loadJobs() {
+  const jobs = await api("/api/jobs");
+  const key = jobs.map(j => j.id + j.status).join();
+  if (key === lastJobsKey) return;
+  const finishedNew = lastJobsKey && jobs.some(j => j.status === "done" && !lastJobsKey.includes(j.id + "done"));
+  lastJobsKey = key;
+  document.getElementById("jobs").innerHTML = jobs.length ? jobs.map(j => `
+    <div class="task"><span>${JOB_ICON[j.status]} <b>${esc(j.filename)}</b>
+      <span class="tag">${j.source === "folder" ? "תיקייה" : j.source === "upload" ? "העלאה" : esc(j.source.replace("api:", "🔌 "))}</span>
+      <span class="muted"> ${esc(j.created_at)} · ${esc(j.message)}</span>
+      ${j.call_id ? ` · <a href="#" onclick="openCustomer(${j.customer_id});return false">לתיק</a>
+        · <a href="/reports/${j.call_id}/customer" target="_blank">דוח ללקוח</a>
+        · <a href="/reports/${j.call_id}/business" target="_blank">דוח לעסק</a>` : ""}
+    </span></div>`).join("") : "ממתין להקלטות...";
+  if (finishedNew) { loadCustomers(); if (currentCustomer) openCustomer(currentCustomer); }
+}
+
+async function editEmail(id, current) {
+  const email = prompt("מייל הלקוח (לשליחת הדוחות):", current || "");
+  if (email === null) return;
+  await api(`/api/customers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+  openCustomer(id);
+}
+
+async function loadCustomers() {
+  const list = await api("/api/customers");
+  const box = document.getElementById("customers");
+  box.innerHTML = list.length ? "" : '<span class="muted">אין עדיין לקוחות. קלטי שיחה ראשונה.</span>';
+  const sel = document.getElementById("customer-select");
+  sel.innerHTML = '<option value="">🔍 זיהוי לקוח אוטומטי מהשיחה</option>';
+  for (const c of list) {
+    const div = document.createElement("div");
+    div.className = "cust" + (c.id === currentCustomer ? " active" : "");
+    div.innerHTML = `<b>${esc(c.name)}</b><small>${esc(c.phone || "")} ${c.customer_number ? "· לקוח " + esc(c.customer_number) : ""}</small>
+      <small>${c.calls_count} שיחות · ${c.open_tasks} משימות פתוחות</small>`;
+    div.onclick = () => openCustomer(c.id);
+    box.appendChild(div);
+    sel.insertAdjacentHTML("beforeend", `<option value="${c.id}">${esc(c.name)}</option>`);
+  }
+}
+
+async function submitCall() {
+  const btn = document.getElementById("submit"), msg = document.getElementById("submit-msg");
+  const fd = new FormData();
+  const file = document.getElementById("file").files[0];
+  if (file) fd.append("file", file);
+  else fd.append("text", document.getElementById("text").value);
+  const cid = document.getElementById("customer-select").value;
+  if (cid) fd.append("customer_id", cid);
+
+  btn.disabled = true; msg.innerHTML = '<span class="muted">⏳ מסנן פרטים אישיים ומנתח את השיחה...</span>';
+  try {
+    const r = await api("/api/calls", { method: "POST", body: fd });
+    const red = r.redactions.length ? ` · 🔒 סוננו: ${esc(r.redactions.join(", "))}` : "";
+    msg.innerHTML = `<span class="muted">✔ נשמר ${r.new_customer ? "בתיק חדש" : "בתיק קיים"}${red} · ${esc(r.delivery)}</span>`;
+    loadJobs();
+    document.getElementById("file").value = ""; document.getElementById("text").value = "";
+    await openCustomer(r.customer_id);
+  } catch (e) {
+    msg.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  } finally { btn.disabled = false; }
+}
+
+function taskHtml(t) {
+  return `<label class="task ${t.done ? "done" : ""}">
+    <input type="checkbox" ${t.done ? "checked" : ""} onchange="toggleTask(${t.id}, this.checked)">
+    <span>${esc(t.description)}<span class="tag">${TASK_CAT[t.category] || ""}</span>${t.due_date ? `<span class="tag due">עד ${esc(t.due_date)}</span>` : ""}</span>
+  </label>`;
+}
+
+async function toggleTask(id, done) {
+  await api(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done }) });
+  openCustomer(currentCustomer);
+}
+
+const EMOTION = { calm: "😌 רגוע", understanding: "💡 מבין", satisfied: "😊 מרוצה", confused: "😕 מבולבל",
+  stressed: "😰 לחוץ", frustrated: "😤 מתוסכל", angry: "😠 כועס" };
+const STAGE = { opening: "פתיחה", middle: "אמצע", closing: "סיום" };
+
+function policyHtml(a) {
+  if (!a.policy_conflicts || !a.policy_conflicts.length) return "";
+  return `<div class="guard"><b>🛡️ Policy Guard: נמצאו ${a.policy_conflicts.length} הבטחות שסותרות את התקנון</b>
+    ${a.policy_conflicts.map(p => `<div class="conflict">
+      <div>🗣️ הנציג אמר: <q>${esc(p.rep_statement)}</q></div>
+      <div>📜 בתקנון: <q>${esc(p.policy_text)}</q></div>
+      <div class="muted">${esc(p.explanation)} · בסיכון: ${p.at_risk === "customer" ? "הלקוח" : "העסק"} · חומרה: ${esc(p.severity)}</div>
+    </div>`).join("")}</div>`;
+}
+
+function emotionHtml(a) {
+  if (!a.emotion_map) return "";
+  const color = a.churn_risk >= 60 ? "var(--bad)" : a.churn_risk >= 30 ? "var(--warn)" : "var(--ok)";
+  return `<h3>🎭 מפה רגשית ומכ"ם נטישה</h3>
+    <div class="row" style="align-items:stretch">${a.emotion_map.map(e => `<div class="emo">
+      <div class="muted">${STAGE[e.stage]}</div><b>${EMOTION[e.emotion] || esc(e.emotion)}</b>
+      <div class="muted">"${esc(e.evidence)}"</div></div>`).join("")}</div>
+    <div class="meter"><div style="width:${a.churn_risk}%;background:${color}"></div></div>
+    <div class="muted">סיכון נטישה: <b style="color:${color}">${a.churn_risk}%</b> · ${esc(a.churn_reason)}</div>`;
+}
+
+function callHtml(c, open) {
+  const a = c.analysis;
+  const risks = policyHtml(a) + a.risk_flags.map(r => `<div class="risk ${r.severity === "low" ? "low" : ""}">⚠️ ${esc(r.description)}</div>`).join("");
+  const glossary = a.glossary.length ? `<h3>📖 מונחים</h3><dl>${a.glossary.map(g => `<dt>${esc(g.term)}</dt><dd>${esc(g.explanation)}</dd>`).join("")}</dl>` : "";
+  const payments = a.payments.length ? `<h3>💳 תשלומים</h3>${a.payments.map(p => `<div>${esc(p.description)}: ${p.amount ?? "?"} ${esc(p.currency)}${p.recurring ? " (חוזר)" : ""}</div>`).join("")}` : "";
+  const fq = a.follow_up_questions.length ? `<h3>❓ שאלות לשיחת ההמשך</h3><ul>${a.follow_up_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul>` : "";
+  return `<details class="call" ${open ? "open" : ""}>
+    <summary>${SENTIMENT[a.sentiment]} ${esc(a.title)} <span class="tag">${CATEGORIES[a.category]}</span><span class="tag">${STATUS[a.status]}</span>
+      <span class="muted"> · ${esc(c.created_at)}</span></summary>
+    ${risks}
+    <h3>סיכום לתיק</h3><div>${esc(a.summary)}</div>
+    <h3>📩 הודעה ללקוח</h3><div class="msg">${esc(a.customer_message)}</div>
+    <div class="row">
+      <button class="secondary" onclick="copyMsg(this)" data-msg="${esc(a.customer_message)}">העתקה לשליחה</button>
+      <button class="secondary" onclick="window.open('/reports/${c.id}/customer')">📩 דוח ללקוח</button>
+      <button class="secondary" onclick="window.open('/reports/${c.id}/business')">🏢 דוח לעסק</button>
+      <button class="secondary" onclick="window.open('/reports/${c.id}/customer.pdf')">📄 PDF ללקוח</button>
+    </div>
+    ${emotionHtml(a)}
+    ${payments}${glossary}${fq}
+    ${c.redactions.length ? `<p class="muted">🔒 סוננו מהתמלול: ${esc(c.redactions.join(", "))}</p>` : ""}
+    <details><summary class="muted">תמלול (אחרי סינון)</summary><pre>${esc(c.transcript)}</pre></details>
+  </details>`;
+}
+
+function copyMsg(btn) {
+  navigator.clipboard.writeText(btn.dataset.msg);
+  btn.textContent = "✔ הועתק";
+  setTimeout(() => (btn.textContent = "העתקה לשליחה"), 1500);
+}
+
+async function openCustomer(id) {
+  currentCustomer = id;
+  const f = await api(`/api/customers/${id}`);
+  const actions = f.tasks.filter(t => t.kind === "action");
+  const commitments = f.tasks.filter(t => t.kind === "commitment");
+  const retention = f.tasks.filter(t => t.kind === "retention" && !t.done);
+  const c = f.customer;
+  const retentionHtml = retention.length ? `<div class="risk">🚨 <b>משימת שימור לראש הצוות</b>${retention.map(taskHtml).join("")}</div>` : "";
+  document.getElementById("file-view").innerHTML = `
+    <div class="card">
+      <h2>📁 תיק לקוח: ${esc(c.name)}</h2>
+      <div class="muted">טלפון: ${esc(c.phone || "-")} · מספר לקוח: ${esc(c.customer_number || "-")} · נפתח: ${esc(c.created_at)}
+        · מייל: ${esc(c.email || "אין")} <a href="#" onclick="editEmail(${c.id}, '${esc(c.email || "")}');return false">עריכה</a></div>
+      ${retentionHtml}
+      <div class="row" style="align-items:flex-start">
+        <div><h3>✅ משימות</h3>${actions.map(taskHtml).join("") || '<span class="muted">אין</span>'}</div>
+        <div><h3>🤝 הבטחות העסק ללקוח</h3>${commitments.map(taskHtml).join("") || '<span class="muted">אין</span>'}</div>
+      </div>
+    </div>
+    <div class="card"><h2>היסטוריית שיחות (${f.calls.length})</h2>${f.calls.map((call, i) => callHtml(call, i === 0)).join("")}</div>`;
+  loadCustomers();
+}
+
+async function loadGlossary() {
+  const g = await api("/api/glossary");
+  document.getElementById("glossary").innerHTML = Object.entries(g).map(([t, e]) =>
+    `<div class="task"><span><b>${esc(t)}</b>: ${esc(e)}</span>
+     <button class="secondary" style="padding:2px 8px" onclick="delTerm('${esc(t)}')">✕</button></div>`).join("")
+    || '<p class="muted">מונחים שהעסק מגדיר כאן יוסברו ללקוח בשפה של העסק.</p>';
+}
+async function addTerm() {
+  const term = document.getElementById("g-term").value.trim(), explanation = document.getElementById("g-expl").value.trim();
+  if (!term || !explanation) return;
+  await api("/api/glossary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ term, explanation }) });
+  document.getElementById("g-term").value = ""; document.getElementById("g-expl").value = "";
+  loadGlossary();
+}
+async function delTerm(t) { await api(`/api/glossary/${encodeURIComponent(t)}`, { method: "DELETE" }); loadGlossary(); }
+
+async function loadPolicy() { document.getElementById("policy").value = (await api("/api/policy")).text; }
+async function savePolicy(btn) {
+  await api("/api/policy", { method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: document.getElementById("policy").value }) });
+  btn.textContent = "✔ נשמר"; setTimeout(() => (btn.textContent = "שמירת תקנון"), 1500);
+}
+
+loadStatus(); loadCustomers(); loadGlossary(); loadJobs(); loadPolicy();
+setInterval(loadJobs, 3000);
+</script>
+</body>
+</html>

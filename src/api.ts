@@ -44,6 +44,32 @@ export async function loginOperator(passcode: string): Promise<AuthSessionRespon
   return handleJson<AuthSessionResponse>(res);
 }
 
+/** WrapUpAI: עדכון כתובות המייל של לקוח (ריק = כתובת דוגמה אוטומטית) */
+export async function updateCustomerEmails(token: string, customerId: string, emails: string): Promise<SystemSnapshot> {
+  const res = await fetch(`/api/internal/customers/${encodeURIComponent(customerId)}/emails`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ emails }),
+  });
+  return handleJson<SystemSnapshot>(res);
+}
+
+/** WrapUpAI: ה-PDF שהוחזר מהמערכת החיצונית ונשמר בשרת הארגון */
+export async function fetchWrapupPdfBlob(
+  token: string,
+  reportId: string,
+  kind: 'business' | 'customer' = 'business'
+): Promise<Blob> {
+  const res = await fetch(`/api/internal/reports/${encodeURIComponent(reportId)}/wrapup-pdf?kind=${kind}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error || 'שגיאה בטעינת ה-PDF של WrapUpAI.');
+  }
+  return res.blob();
+}
+
 export async function fetchBootstrap(token: string): Promise<SystemSnapshot> {
   const res = await fetch('/api/internal/bootstrap', {
     headers: { Authorization: `Bearer ${token}` },
@@ -73,6 +99,7 @@ export async function createCustomer(
     department: string;
     assignedHandler: string;
     caseStatus: string;
+    emails?: string;
   }
 ): Promise<{ customerId: string; snapshot: SystemSnapshot }> {
   const res = await fetch('/api/internal/customers', {

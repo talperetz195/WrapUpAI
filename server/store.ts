@@ -1204,6 +1204,42 @@ class EnterpriseStore {
 
   constructor() {
     this.loadFromDisk();
+    this.applyDemoEmails();
+  }
+
+  /** WrapUpAI: כתובות מייל לדמו (מופנות בפועל לכתובת בדיקה ב-WrapUpAI) */
+  private applyDemoEmails(): void {
+    const demoEmails: Record<string, string[]> = {
+      'cust-101': ['david.mizrahi@example.com'],
+      'cust-102': ['rachel.avraham@example.com'],
+      'cust-103': ['yosef.berkovich@example.com', 'sara.berkovich@example.com'],
+      'cust-104': ['amir.hasson@example.com'],
+      'cust-105': ['liron.bendavid@example.com'],
+      'cust-106': ['itay.shapira@example.com'],
+      'cust-107': ['maya.friedman@example.com'],
+      'cust-108': ['ron.kadmi@example.com'],
+    };
+    for (const c of this.customers) {
+      if (!c.emails || c.emails.length === 0) c.emails = demoEmails[c.id] || [this.demoEmailFor(c)];
+    }
+  }
+
+  /** כתובת דוגמה אוטומטית (@example.com) לכל לקוח בלי מייל - לפי תעתיק השם לאנגלית */
+  public demoEmailFor(c: { id: string; fullName: string }): string {
+    const map: Record<string, string> = {
+      א: 'a', ב: 'b', ג: 'g', ד: 'd', ה: 'h', ו: 'v', ז: 'z', ח: 'ch', ט: 't', י: 'y', כ: 'k', ך: 'k', ל: 'l',
+      מ: 'm', ם: 'm', נ: 'n', ן: 'n', ס: 's', ע: 'a', פ: 'p', ף: 'f', צ: 'tz', ץ: 'tz', ק: 'k', ר: 'r', ש: 'sh', ת: 't',
+    };
+    const local = c.fullName
+      .trim()
+      .split(/\s+/)
+      .map((w) => [...w].map((ch) => map[ch] ?? (/[a-z0-9]/i.test(ch) ? ch.toLowerCase() : '')).join(''))
+      .filter(Boolean)
+      .join('.');
+    const taken = new Set(this.customers.flatMap((x) => (x.id === c.id ? [] : x.emails || [])));
+    let email = `${local || c.id}@example.com`;
+    if (taken.has(email)) email = `${local || 'customer'}.${c.id.replace(/^cust-/, '')}@example.com`;
+    return email;
   }
 
   private safeAudioFilename(recordingId: string): string {

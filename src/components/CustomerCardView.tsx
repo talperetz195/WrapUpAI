@@ -18,7 +18,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { createCustomer, revealCustomerId } from '../api';
+import { createCustomer, fetchWrapupPdfBlob, revealCustomerId, updateCustomerEmails } from '../api';
 import { INSTITUTIONAL_DEPARTMENTS } from '../constants';
 import type { CalendarEvent, CallAnalysisReport, CustomerRecord, SystemSnapshot, TaskPriority } from '../types';
 
@@ -78,6 +78,10 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
   const [newFullName, setNewFullName] = useState('');
   const [newNationalId, setNewNationalId] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [newEmails, setNewEmails] = useState('');
+  const [editingEmails, setEditingEmails] = useState<string | null>(null);
+  const [editingFor, setEditingFor] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [newCity, setNewCity] = useState('תל אביב-יפו');
   const [newBranch, setNewBranch] = useState('סניף תל אביב מרכז');
   const [newDepartment, setNewDepartment] = useState('אבטלה והבטחת הכנסה');
@@ -150,6 +154,7 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
         fullName: newFullName,
         nationalId: newNationalId,
         phone: newPhone,
+        emails: newEmails,
         city: newCity,
         branch: newBranch,
         department: newDepartment,
@@ -161,6 +166,7 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
       setNewFullName('');
       setNewNationalId('');
       setNewPhone('');
+      setNewEmails('');
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'שגיאה בפתיחת כרטיס הלקוח.');
     } finally {
@@ -297,6 +303,65 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
               <div className="text-slate-500 mb-1">סטטוס תיק</div>
               <div className="font-medium text-slate-900">{activeCustomer.caseStatus}</div>
             </div>
+            <div className="col-span-2 sm:col-span-4">
+              <div className="text-slate-500 mb-1">דוא״ל לסיכומי שיחה (WrapUpAI)</div>
+              {editingEmails === null || editingFor !== activeCustomer.id ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {(activeCustomer.emails || []).map((email) => (
+                    <span key={email} className="inline-flex items-center gap-1.5 font-mono text-slate-900" dir="ltr">
+                      {email}
+                      {email.endsWith('@example.com') && (
+                        <span className="text-[10px] font-sans px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                          כתובת דוגמה
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                  <button
+                    onClick={() => {
+                      setEmailError(null);
+                      setEditingFor(activeCustomer.id);
+                      setEditingEmails((activeCustomer.emails || []).filter((e) => !e.endsWith('@example.com')).join(', '));
+                    }}
+                    className="text-blue-700 hover:underline font-medium"
+                  >
+                    עריכה
+                  </button>
+                </div>
+              ) : (
+                <form
+                  className="flex items-center gap-2 flex-wrap"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await updateCustomerEmails(token, activeCustomer.id, editingEmails);
+                      setEditingEmails(null);
+                    } catch (err) {
+                      setEmailError(err instanceof Error ? err.message : 'שגיאה בעדכון המייל');
+                    }
+                  }}
+                >
+                  <input
+                    autoFocus
+                    dir="ltr"
+                    value={editingEmails}
+                    onChange={(e) => setEditingEmails(e.target.value)}
+                    placeholder="name@company.com, partner@company.com"
+                    className="flex-1 min-w-[220px] px-2.5 py-1.5 text-xs font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                  <button type="submit" className="px-3 py-1.5 text-xs font-medium bg-[#0F2942] text-white rounded-lg">
+                    שמירה
+                  </button>
+                  <button type="button" onClick={() => setEditingEmails(null)} className="px-3 py-1.5 text-xs text-slate-600">
+                    ביטול
+                  </button>
+                  <span className="w-full text-[11px] text-slate-500">
+                    אפשר כמה כתובות מופרדות בפסיק. השארה ריקה = כתובת דוגמה אוטומטית.
+                  </span>
+                  {emailError && <span className="w-full text-[11px] text-red-700">{emailError}</span>}
+                </form>
+              )}
+            </div>
           </div>
         </section>
 
@@ -348,6 +413,29 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                          {(['business', 'customer'] as const).map((kind) =>
+                            (kind === 'business' ? activeReport.wrapup?.pdfFileName : activeReport.wrapup?.customerPdfFileName) ? (
+                              <button
+                                key={kind}
+                                onClick={async () => {
+                                  try {
+                                    const blob = await fetchWrapupPdfBlob(token, activeReport.id, kind);
+                                    window.open(URL.createObjectURL(blob), '_blank');
+                                  } catch (err) {
+                                    alert(err instanceof Error ? err.message : 'שגיאה בפתיחת ה-PDF');
+                                  }
+                                }}
+                                className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                                  kind === 'business'
+                                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                    : 'bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50'
+                                }`}
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>{kind === 'business' ? 'PDF סיכום ותחושות לקוח (WrapUpAI)' : 'PDF שנשלח ללקוח'}</span>
+                              </button>
+                            ) : null
+                          )}
                           <button
                             onClick={() => onOpenPdf(activeReport.id)}
                             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-[#0F2942] hover:bg-slate-800 text-white rounded-lg transition-colors whitespace-nowrap"
@@ -376,6 +464,13 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                         <div className="text-xs font-semibold text-slate-500 mb-1">סיכום מנהלים</div>
                         {activeReport.executiveSummary}
                       </div>
+
+                      {activeReport.wrapup && (
+                        <div className="text-xs text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5">
+                          <span className="font-bold tracking-wide">WRAPUP AI · </span>
+                          {activeReport.wrapup.delivery}
+                        </div>
+                      )}
 
                       <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
                         <Users className="w-4 h-4 text-slate-400 shrink-0" />
@@ -730,6 +825,20 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                     value={newPhone}
                     onChange={(e) => setNewPhone(e.target.value)}
                     placeholder="050-0000000"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    דוא״ל לסיכומי שיחה (WrapUpAI) · אפשר כמה, מופרדים בפסיק
+                  </label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={newEmails}
+                    onChange={(e) => setNewEmails(e.target.value)}
+                    placeholder="name@example.com, partner@example.com"
                     className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
