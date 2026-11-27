@@ -26,6 +26,7 @@ import bridge  # noqa: E402
 import connectors  # noqa: E402
 import db  # noqa: E402
 import deliver  # noqa: E402
+import email_design  # noqa: E402
 import transcribe  # noqa: E402
 import watcher  # noqa: E402
 from pipeline import process_file  # noqa: E402
@@ -93,6 +94,38 @@ def team_external_analyze(body: dict, x_transfer_token: str | None = Header(None
         return bridge.accept(x_transfer_token, body)
     except bridge.BridgeError as e:
         raise HTTPException(403, str(e))
+
+
+# ---------- משוב לקוח מהמייל (לחיצה על פרצוף) ----------
+
+def _feedback_html(call_id: int, t: str, score: int | None) -> HTMLResponse:
+    assets = email_design.ensure_assets(deliver._chrome())
+    img = lambda n: email_design.data_uri(assets[n]) if n in assets else ""  # noqa: E731
+    return HTMLResponse(email_design.feedback_page(call_id, t, score, deliver.business_name(), img))
+
+
+@app.get("/feedback/{call_id}", response_class=HTMLResponse)
+def feedback_form(call_id: int, t: str = ""):
+    if not email_design.verify_feedback_token(call_id, t):
+        raise HTTPException(403, "קישור משוב לא תקין")
+    return _feedback_html(call_id, t, db.latest_feedback_score(call_id))
+
+
+@app.get("/feedback/{call_id}/{score}", response_class=HTMLResponse)
+def feedback_score(call_id: int, score: int, t: str = ""):
+    if not email_design.verify_feedback_token(call_id, t) or score not in range(1, 6):
+        raise HTTPException(403, "קישור משוב לא תקין")
+    db.save_feedback(call_id, score=score)
+    return _feedback_html(call_id, t, score)
+
+
+@app.post("/feedback/{call_id}/comment", response_class=HTMLResponse)
+def feedback_comment(call_id: int, t: str = "", comment: str = Form("")):
+    if not email_design.verify_feedback_token(call_id, t):
+        raise HTTPException(403, "קישור משוב לא תקין")
+    if comment.strip():
+        db.save_feedback(call_id, comment=comment.strip()[:2000])
+    return _feedback_html(call_id, t, db.latest_feedback_score(call_id) or 0)
 
 
 @app.get("/api/jobs")

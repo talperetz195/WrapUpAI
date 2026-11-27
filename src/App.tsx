@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   ShieldCheck,
+  Smile,
   Users,
   X,
 } from 'lucide-react';
@@ -25,13 +26,15 @@ import {
 import { AuditLogView } from './components/AuditLogView';
 import { AuthGate } from './components/AuthGate';
 import { CustomerCardView } from './components/CustomerCardView';
+import { CustomerSentimentView } from './components/wrapup/CustomerSentimentView';
+import { HomeDashboard, buildRows } from './components/wrapup/HomeDashboard';
 import { ExternalSystemView } from './components/ExternalSystemView';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { PbxCenter } from './components/PbxCenter';
 import { PdfViewerModal } from './components/PdfViewerModal';
 import type { SystemNotification, SystemSnapshot } from './types';
 
-type ActiveSection = 'pbx' | 'external' | 'customers' | 'audit';
+type ActiveSection = 'home' | 'sentiment' | 'pbx' | 'external' | 'customers' | 'audit';
 
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
@@ -40,7 +43,7 @@ export default function App() {
 
   const [snapshot, setSnapshot] = useState<SystemSnapshot | null>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<ActiveSection>('pbx');
+  const [activeSection, setActiveSection] = useState<ActiveSection>('home');
   const [selectedRecordingId, setSelectedRecordingId] = useState<string | null>('rec-001');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('cust-101');
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -171,6 +174,23 @@ export default function App() {
     }
   };
 
+  // WrapUpAI: מעבר לדף תחושות הלקוח / להקלטה במרכזייה
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0 });
+    document.querySelectorAll('main, [data-scroll-root]').forEach((el) => el.scrollTo({ top: 0 }));
+  };
+  const handleOpenSentiment = (customerId: string) => {
+    setSelectedCustomerId(customerId);
+    setActiveSection('sentiment');
+    setMobileNavOpen(false);
+    scrollToTop();
+  };
+  const handleOpenRecording = (recordingId: string) => {
+    setSelectedRecordingId(recordingId);
+    setActiveSection('pbx');
+    setMobileNavOpen(false);
+  };
+
   const handleOpenCustomerReport = (customerId: string, reportId?: string) => {
     setSelectedCustomerId(customerId);
     setSelectedReportId(reportId || null);
@@ -273,6 +293,7 @@ export default function App() {
   }
 
   const navItems: Array<{ id: ActiveSection; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+    { id: 'home', label: 'דף הבית · תחושות לקוחות', icon: Smile },
     { id: 'pbx', label: 'מרכזיה והקלטות', icon: Headphones },
     { id: 'external', label: 'מערכת תמלול חיצונית', icon: Lock },
     { id: 'customers', label: 'כרטיסי לקוחות ויומן', icon: Users },
@@ -280,6 +301,8 @@ export default function App() {
   ];
 
   const sectionTitleMap: Record<ActiveSection, string> = {
+    home: 'דף הבית / תחושות הלקוחות',
+    sentiment: 'דף הבית / תחושות הלקוח בשיחה',
     pbx: 'המערכת הפנימית / מרכזיית הקלטות שיחה',
     external: 'המערכת החיצונית / תמלול וניתוח אוטומטי מוגבל',
     customers: 'המערכת הפנימית / כרטיסי לקוחות ויומן',
@@ -311,7 +334,7 @@ export default function App() {
         <nav className="flex-1 p-3 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const active = activeSection === item.id;
+            const active = activeSection === item.id || (item.id === 'home' && activeSection === 'sentiment');
             return (
               <button
                 key={item.id}
@@ -415,6 +438,37 @@ export default function App() {
             </div>
           ) : (
             <>
+              {activeSection === 'home' && (
+                <HomeDashboard
+                  operatorName={operator.name}
+                  customers={snapshot.customers}
+                  reports={snapshot.reports}
+                  recordings={snapshot.recordings}
+                  onOpenSentiment={handleOpenSentiment}
+                  onOpenCustomerCard={(cid) => handleOpenCustomerReport(cid)}
+                  onOpenRecording={handleOpenRecording}
+                />
+              )}
+
+              {activeSection === 'sentiment' &&
+                (() => {
+                  const row = buildRows(snapshot.customers, snapshot.reports, snapshot.recordings).find(
+                    (r) => r.customer.id === selectedCustomerId
+                  );
+                  return row ? (
+                    <CustomerSentimentView
+                      token={token}
+                      customer={row.customer}
+                      report={row.sentiment ? row.report : undefined}
+                      onBack={() => {
+                        setActiveSection('home');
+                        scrollToTop();
+                      }}
+                      onOpenCustomerCard={handleOpenCustomerReport}
+                    />
+                  ) : null;
+                })()}
+
               {activeSection === 'pbx' && (
                 <PbxCenter
                   token={token}

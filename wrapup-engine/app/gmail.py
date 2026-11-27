@@ -45,6 +45,18 @@ def _service():
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
 
+def send_message(msg: EmailMessage) -> str:
+    """שולח הודעת MIME מוכנה (כולל תמונות inline וקבצים מצורפים)."""
+    from googleapiclient.errors import HttpError
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    try:
+        sent = _service().users().messages().send(userId="me", body={"raw": raw}).execute()
+    except HttpError as e:
+        raise GmailError(f"Gmail החזיר שגיאה {e.status_code}: {e.reason}") from e
+    return sent["id"]
+
+
 def send(to: str, subject: str, html_body: str, attachments: list[Path] | None = None) -> str:
     """שולח מייל HTML עם קבצים מצורפים. מחזיר את מזהה ההודעה ב-Gmail."""
     from googleapiclient.errors import HttpError

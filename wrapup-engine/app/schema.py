@@ -77,6 +77,7 @@ class EmotionPoint(BaseModel):
     stage: Literal["opening", "middle", "closing"]
     emotion: Emotion
     evidence: str = Field(description="ציטוט קצר מהלקוח שמראה את הרגש")
+    timestamp: Optional[str] = Field(description="הזמן בשיחה בפורמט MM:SS אם מופיע בתמלול (למשל [00:31]), אחרת null")
 
 
 class SpeakerRole(BaseModel):
@@ -117,5 +118,8 @@ class CallAnalysis(BaseModel):
     customer_end_emotion: Emotion = Field(description="איך הלקוח הרגיש בסוף השיחה")
     churn_risk: int = Field(description="סיכון נטישה 0-100: עד כמה סביר שהלקוח יעזוב בעקבות השיחה")
     churn_reason: str = Field(description="משפט אחד: למה זה הסיכון")
+    rep_recommendation: str = Field(
+        description="המלצה לנציג: 1-2 משפטים מעשיים מה כדאי לעשות עכשיו מול הלקוח, לפי הרגש שלו בסיום והבעיות שנשארו פתוחות"
+    )
     sentiment: Literal["positive", "neutral", "negative"]
     status: Literal["resolved", "pending_customer", "pending_business", "needs_follow_up"]

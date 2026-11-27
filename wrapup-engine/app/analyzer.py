@@ -43,7 +43,8 @@ Policy Guard (חשוב מאוד):
 - אם יש סתירה, הזכר/י אותה גם ב-customer_message בעדינות ("שימ/י לב: לפי התקנון...") כדי שהלקוח לא יופתע.
 
 רגש ונטישה:
-- emotion_map: רגש הלקוח בפתיחה, באמצע ובסיום, לפי מה שאמר ואיך ניסח (חזרות, שאלות "לא הבנתי", טון חריף).
+- emotion_map: רגש הלקוח בפתיחה, באמצע ובסיום, לפי מה שאמר ואיך ניסח (חזרות, שאלות "לא הבנתי", טון חריף), עם הזמן בשיחה.
+- rep_recommendation: המלצה קצרה ומעשית לנציג, מנוסחת אליו ("מומלץ ל...").
 - churn_risk 0-100: גבוה אם הלקוח כועס/מתוסכל בסוף, איים לעזוב, הבעיה לא נפתרה או קיבל הבטחה סותרת.
 - אם הלקוח סיים מבולבל/לחוץ/מתוסכל/כועס: customer_message חייב להיות פשוט במיוחד, קצר, מרגיע, עם צעד אחד ברור בכל שורה.
 - customer_message נשלח ללקוח כמו שהוא, בשם העסק: בלי להציע עזרה נוספת, בלי שאלות אליו, ובלי לדבר על "אני" כעוזר AI."""
@@ -202,13 +203,14 @@ def _demo_analysis() -> CallAnalysis:
             "at_risk": "customer", "severity": "high",
         }],
         "emotion_map": [
-            {"stage": "opening", "emotion": "stressed", "evidence": "אני לא מצליחה לשלם אותו בבת אחת"},
-            {"stage": "middle", "emotion": "confused", "evidence": "מה זה פריים פלוס 2?"},
-            {"stage": "closing", "emotion": "understanding", "evidence": "בסדר, מתאים לי"},
+            {"stage": "opening", "emotion": "stressed", "evidence": "אני לא מצליחה לשלם אותו בבת אחת", "timestamp": "00:04"},
+            {"stage": "middle", "emotion": "confused", "evidence": "מה זה פריים פלוס 2?", "timestamp": "00:31"},
+            {"stage": "closing", "emotion": "understanding", "evidence": "בסדר, מתאים לי", "timestamp": "00:58"},
         ],
         "customer_end_emotion": "understanding",
         "churn_risk": 35,
         "churn_reason": "הלקוחה בלחץ כלכלי, אבל קיבלה פתרון ויצאה מהשיחה מבינה.",
+        "rep_recommendation": "הלקוחה הבינה את הפריסה, אבל העמלה סותרת את התקנון. מומלץ להבהיר לה בכתב לפני שהיא חותמת.",
         "sentiment": "neutral",
         "status": "pending_customer",
     })

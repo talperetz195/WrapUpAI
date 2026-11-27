@@ -17,7 +17,7 @@ import {
 } from './server/security.ts';
 import { store } from './server/store.ts';
 import { isAzureTtsConfigured, synthesizeDialogueWithAzure } from './server/azureTts.ts';
-import type { CallAnalysisReport, DialogueTurn, ExternalTransferPayload, PbxRecording, TransferJob } from './server/types.ts';
+import type { CallAnalysisReport, DialogueTurn, ExternalTransferPayload, PbxRecording, TransferJob, WrapUpSentiment } from './server/types.ts';
 
 const PORT = 3000;
 const ALLOWED_AUDIO_MIMES = new Set([
@@ -855,6 +855,7 @@ async function startServer(): Promise<void> {
         pdfBase64?: string | null;
         customerPdfFileName?: string | null;
         customerPdfBase64?: string | null;
+        sentiment?: WrapUpSentiment;
       };
       jobId: string;
       analysis: {
@@ -908,6 +909,7 @@ async function startServer(): Promise<void> {
         sentTo: wrapup.sentTo || [],
         pdfFileName: wrapup.pdfBase64 ? wrapup.pdfFileName || `${reportId}.pdf` : null,
         customerPdfFileName: wrapup.customerPdfBase64 ? wrapup.customerPdfFileName || `${reportId}-customer.pdf` : null,
+        sentiment: wrapup.sentiment,
       };
     }
 

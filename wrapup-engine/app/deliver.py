@@ -20,6 +20,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import db
+import email_design
 import gmail
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -123,28 +124,14 @@ def business_name() -> str:
     return os.getenv("BUSINESS_NAME", "העסק")
 
 
-def customer_report(call: dict, recipient_name: str | None = None) -> str:
-    a, c = call["analysis"], call["customer"]
-    greeting = recipient_name or c.get("name")
-    my_tasks = [t for t in a["action_items"] if t["owner"] == "customer"]
-    risks = "".join(f'<div class="risk">⚠️ {_e(r["description"])}</div>' for r in a["risk_flags"])
-    glossary = "".join(f"<dt>{_e(g['term'])}</dt><dd>{_e(g['explanation'])}</dd>" for g in a["glossary"])
-    payments = "".join(f"<li>{_e(p['description'])}: {_e(p['amount'])} {_e(p['currency'])}{' (חודשי)' if p['recurring'] else ''}</li>"
-                       for p in a["payments"])
-    questions = "".join(f"<li>{_e(q)}</li>" for q in a["follow_up_questions"])
-    body = f"""
-      <h1>{_e(greeting) + ", " if greeting else ""}סיכום השיחה שלך עם {_e(business_name())}</h1>
-      <div class="muted">{_e(call['created_at'])} · {_e(a['title'])}</div>
-      {_policy_block(a, for_customer=True)}{risks}
-      {next_meeting_block(a)}
-      <h2>📩 מה סוכם</h2><div class="msg">{_e(a['customer_message'])}</div>
-      <h2>✅ מה עליך לעשות</h2>{_items(my_tasks, "אין משימות - הכל טופל 🎉", with_calendar=True)}
-      <h2>🤝 מה {_e(business_name())} התחייב לעשות</h2>{_items(a['business_commitments'])}
-      {f'<h2>💳 תשלומים</h2><ul>{payments}</ul>' if payments else ''}
-      {f'<h2>📖 מה פירוש המונחים</h2><dl>{glossary}</dl>' if glossary else ''}
-      {f'<h2>❓ שאלות לשיחה הבאה</h2><ul>{questions}</ul>' if questions else ''}
-      <p class="muted">הסיכום נוצר אוטומטית ע"י WrapUpAI. פרטים אישיים (ת"ז, סיסמאות, כרטיס אשראי) סוננו ולא נשמרו.</p>"""
-    return _page("סיכום השיחה שלך", body)
+def customer_report(call: dict, recipient_name: str | None = None, inline_images: bool = False) -> str:
+    """המייל/PDF הוויזואלי ללקוח (עיצוב Figma). inline_images=True → תמונות cid: למייל, אחרת data: ל-PDF."""
+    assets = email_design.ensure_assets(_chrome())
+    if inline_images:
+        img = lambda n: f"cid:{n}" if n in assets else ""  # noqa: E731
+    else:
+        img = lambda n: email_design.data_uri(assets[n]) if n in assets else ""  # noqa: E731
+    return email_design.customer_email_html(call, recipient_name, img, business_name(), calendar_link, EMOTION)
 
 
 def business_report(call: dict) -> str:
@@ -226,21 +213,33 @@ def recipients(call: dict) -> list[tuple[str, str]]:
     return out
 
 
-def _send(to: str, subject: str, html_body: str, attachment: Path | None) -> None:
-    """Gmail API אם מחובר, אחרת SMTP אם מוגדר."""
-    if gmail.is_configured():
-        gmail.send(to, subject, html_body, [attachment] if attachment else [])
-        return
+def _build_message(to: str, subject: str, html_body: str, attachment: Path | None, inline: bool) -> EmailMessage:
     msg = EmailMessage()
-    msg["Subject"], msg["From"], msg["To"] = subject, os.environ["SMTP_USER"], to
+    msg["To"], msg["Subject"] = to, subject
+    if os.getenv("SMTP_USER") and not gmail.is_configured():
+        msg["From"] = os.environ["SMTP_USER"]
     msg.set_content("הסיכום מצורף כקובץ PDF.")
     msg.add_alternative(html_body, subtype="html")
+    if inline:
+        html_part = msg.get_payload()[-1]
+        for name, path in email_design.ensure_assets(_chrome()).items():
+            if f"cid:{name}" in html_body:
+                html_part.add_related(path.read_bytes(), maintype="image", subtype="png", cid=f"<{name}>", filename=f"{name}.png")
     if attachment and attachment.exists():
         msg.add_attachment(attachment.read_bytes(), maintype="application", subtype="pdf", filename=attachment.name)
-    with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.getenv("SMTP_PORT", "587")), timeout=30) as s:
-        s.starttls()
-        s.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
-        s.send_message(msg)
+    return msg
+
+
+def _send(to: str, subject: str, html_body: str, attachment: Path | None, inline: bool = False) -> None:
+    """Gmail API אם מחובר, אחרת SMTP אם מוגדר."""
+    msg = _build_message(to, subject, html_body, attachment, inline)
+    if gmail.is_configured():
+        gmail.send_message(msg)
+        return
+    with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.getenv("SMTP_PORT", "587")), timeout=30) as smtp:
+        smtp.starttls()
+        smtp.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
+        smtp.send_message(msg)
 
 
 def email_mode() -> str:
@@ -265,7 +264,7 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
         pdfs[kind] = pdf_path if make_pdf(html_path, pdf_path) else None
     notes = ["PDF נוצר" if pdfs["customer"] else "PDF לא נוצר (אין Chrome)"]
 
-    mode = email_mode()
+    mode = "none" if os.getenv("DISABLE_EMAIL") == "1" else email_mode()
     people = recipients_override if recipients_override is not None else recipients(call)
     if mode == "none":
         notes.append(f"מייל לא מוגדר ({len(people)} נמענים ממתינים)")
@@ -283,7 +282,7 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
             f" [דמו - במקור ל: {email or 'ללקוח אין מייל בתיק'}]" if test_to else "")
         try:
             for to in test_to or [email]:
-                _send(to, subject, customer_report(call, name), pdfs["customer"])
+                _send(to, subject, customer_report(call, name, inline_images=True), pdfs["customer"], inline=True)
             sent_to.append(email or f"{name or 'לקוח'} (דמו - אין מייל בתיק)")
         except Exception as e:  # noqa: BLE001
             failed.append(f"{email}: {e}")

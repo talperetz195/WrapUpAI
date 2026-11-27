@@ -92,9 +92,26 @@ export interface TranscriptLine {
   text: string;
 }
 
+/** WrapUpAI: נתוני רגש מובנים מהשיחה (למסכי דף הבית ותחושות הלקוח) */
+export type WrapUpEmotion = 'angry' | 'frustrated' | 'stressed' | 'confused' | 'calm' | 'understanding' | 'satisfied';
+
+export interface WrapUpSentiment {
+  score: number;
+  deltaFromOpening: number;
+  endEmotion: WrapUpEmotion;
+  journey: Array<{ stage: 'opening' | 'middle' | 'closing'; emotion: WrapUpEmotion; evidence: string; timestamp?: string | null }>;
+  churnRisk: number;
+  churnReason: string;
+  policyConflicts: Array<{ repStatement: string; policyText: string; explanation: string; severity: string }>;
+  recommendation: string;
+  openTasks: number;
+  title: string;
+}
+
 export interface WrapUpDelivery {
   delivery: string;
   sentTo: string[];
+  sentiment?: WrapUpSentiment;
   pdfFileName?: string | null;
   customerPdfFileName?: string | null;
 }

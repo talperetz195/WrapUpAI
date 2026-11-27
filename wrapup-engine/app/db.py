@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     due_date TEXT,
     done INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id INTEGER NOT NULL,
+    score INTEGER,
+    comment TEXT,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -281,3 +288,17 @@ def get_policy() -> str:
 def set_policy(text: str) -> None:
     with connect() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('policy', ?)", (text,))
+
+
+# ---------- משוב לקוח על השירות (מהמייל) ----------
+
+def save_feedback(call_id: int, score: int | None = None, comment: str | None = None) -> None:
+    with connect() as conn:
+        conn.execute("INSERT INTO feedback (call_id, score, comment) VALUES (?, ?, ?)", (call_id, score, comment))
+
+
+def latest_feedback_score(call_id: int) -> int | None:
+    with connect() as conn:
+        row = conn.execute("SELECT score FROM feedback WHERE call_id = ? AND score IS NOT NULL ORDER BY id DESC LIMIT 1",
+                           (call_id,)).fetchone()
+        return row["score"] if row else None

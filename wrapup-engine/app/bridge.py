@@ -112,6 +112,34 @@ def _task(title: str, description: str, owner: str, category: str, priority: str
     }
 
 
+EMOTION_SCORE = {"angry": 10, "frustrated": 20, "stressed": 35, "confused": 50, "calm": 65, "understanding": 75, "satisfied": 92}
+STAGE_WEIGHT = {"opening": 0.2, "middle": 0.3, "closing": 0.5}
+
+
+def sentiment_for_team(a: dict) -> dict:
+    """נתוני רגש מובנים למסכי המרכזייה: ציון חוויה, מסע רגש, נטישה, Policy Guard והמלצה לנציג."""
+    journey = sorted(a.get("emotion_map") or [], key=lambda e: list(STAGE_WEIGHT).index(e["stage"]))
+    by_stage = {e["stage"]: EMOTION_SCORE.get(e["emotion"], 50) for e in journey}
+    total_w = sum(STAGE_WEIGHT[s] for s in by_stage) or 1
+    score = round(sum(by_stage[s] * STAGE_WEIGHT[s] for s in by_stage) / total_w) if by_stage else 50
+    opening = by_stage.get("opening", score)
+    end = a.get("customer_end_emotion") or (journey[-1]["emotion"] if journey else "calm")
+    return {
+        "score": score,
+        "deltaFromOpening": by_stage.get("closing", score) - opening,
+        "endEmotion": end,
+        "journey": [{"stage": e["stage"], "emotion": e["emotion"], "evidence": e["evidence"],
+                     "timestamp": e.get("timestamp")} for e in journey],
+        "churnRisk": a["churn_risk"],
+        "churnReason": a["churn_reason"],
+        "policyConflicts": [{"repStatement": p["rep_statement"], "policyText": p["policy_text"],
+                             "explanation": p["explanation"], "severity": p["severity"]} for p in a["policy_conflicts"]],
+        "recommendation": a.get("rep_recommendation") or "",
+        "openTasks": len(a["action_items"]) + len(a["business_commitments"]),
+        "title": a["title"],
+    }
+
+
 def to_team_report(a: dict, transcript: str) -> dict:
     roles = {s["label"]: s["role"] for s in a.get("speakers", [])}
     rep_label = next((s["label"] for s in a.get("speakers", []) if "נציג" in s["role"]), "נציג")
@@ -226,6 +254,7 @@ def _run_job(body: dict) -> None:
             "wrapup": {
                 "delivery": result["delivery"],
                 "sentTo": result.get("sent_to", []),
+                "sentiment": sentiment_for_team(result["analysis"]),
                 # PDF לארגון: סיכום הפגישה + תחושות הלקוח (מפה רגשית, סיכון נטישה)
                 "pdfFileName": biz["fileName"],
                 "pdfBase64": biz["base64"],
