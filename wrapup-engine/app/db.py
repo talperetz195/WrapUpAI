@@ -326,3 +326,19 @@ def set_compliance_checks(lines: list[str]) -> None:
     with connect() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('compliance', ?)",
                      ("\n".join(x.strip() for x in lines if x.strip()),))
+
+
+# ---------- מייל המנהל/ת (מקבל/ת דוח כשהנציג דיבר בצורה מזלזלת/מקצינה) ----------
+
+DEFAULT_MANAGER_EMAIL = "admin@example.com"
+
+
+def get_manager_email() -> str:
+    with connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'manager_email'").fetchone()
+    return (row["value"] if row and row["value"] else DEFAULT_MANAGER_EMAIL).strip()
+
+
+def set_manager_email(email: str) -> None:
+    with connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('manager_email', ?)", (email.strip(),))

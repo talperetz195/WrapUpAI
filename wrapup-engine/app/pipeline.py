@@ -26,7 +26,7 @@ def phone_from_filename(name: str) -> str | None:
 
 def process_file(path: Path, source: str, customer_id: int | None = None,
                  display_name: str | None = None, customer_hint: dict | None = None,
-                 recipients: list[tuple[str, str]] | None = None, on_progress=None) -> dict:
+                 recipients: list[tuple[str, str]] | None = None, on_progress=None, send_customer: bool = True) -> dict:
     """customer_hint: פרטי לקוח שהגיעו מהמערכת של העסק (שם/טלפון/מייל) - הכי אמינים לזיהוי."""
     hint = customer_hint or {}
     progress = on_progress or (lambda stage: None)
@@ -45,7 +45,7 @@ def process_file(path: Path, source: str, customer_id: int | None = None,
                              phone_hint=hint.get("phone") or phone_from_filename(name))  # 4. שמירה בתיק
         db.fill_customer(saved["customer_id"], hint)            # משלימים מייל/שם ממערכת העסק
         progress("delivering")
-        delivery = deliver.send_reports(saved["call_id"], recipients)  # 5. PDF + מייל לכל הלקוחות
+        delivery = deliver.send_reports(saved["call_id"], recipients, send_customer=send_customer)  # 5. PDF + מייל לכל הלקוחות
     except Exception as e:  # noqa: BLE001 - כל שגיאה נרשמת ביומן ולא מפילה את המערכת
         db.finish_job(job_id, "failed", str(e))
         raise

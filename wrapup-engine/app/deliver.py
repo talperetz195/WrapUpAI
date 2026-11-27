@@ -173,6 +173,21 @@ def business_report(call: dict, inline_images: bool = False) -> str:
     risks = "".join(f'<div style="{card}background:#FDECEC;color:#B3261E;font-weight:700;padding:12px 16px">⚠️ [{_e(r["severity"])}] {_e(r["description"])}</div>'
                     for r in a["risk_flags"])
 
+    # התנהלות הנציג (מזלזלת / מקצינה)
+    conduct_html = ""
+    rc = a.get("rep_conduct") or {}
+    if rc.get("issue"):
+        kinds = {"dismissive": "מזלזל", "condescending": "מתנשא", "aggressive": "תוקפני", "escalating": "מקצין",
+                 "interrupting": "קוטע את הלקוח", "other": "אחר"}
+        sev = {"low": "נמוכה", "medium": "בינונית", "high": "גבוהה"}.get(rc.get("severity"), "")
+        quotes = "".join(f'<div style="background:#FFFFFF;border-radius:10px;padding:10px 12px;margin-top:8px;font-size:14px;color:#2E3440">'
+                         f'<b style="color:#B3261E">{_e(kinds.get(x["kind"], x["kind"]))}</b> · הנציג אמר: <q>{_e(x["quote"])}</q><br>'
+                         f'<span style="color:#7A808C">{_e(x["explanation"])}</span></div>' for x in rc.get("issues") or [])
+        conduct_html = (f'<div style="{card}background:#FFF0EC;border:2px solid #E5534B">'
+                        f'<p style="{h3}color:#7A1610">🧑‍💼 התנהלות הנציג בשיחה · חומרה {sev}'
+                        + (' · <span style="color:#B3261E">מעלה את סיכון הנטישה</span>' if rc.get("raises_churn") else '') + '</p>'
+                        f'<p style="{p}">{_e(rc.get("summary"))}</p>{quotes}</div>')
+
     # בקרת ציות רגולטורית (רמזור)
     comp = classify.compliance(a)
     compliance_html = ""
@@ -186,7 +201,7 @@ def business_report(call: dict, inline_images: bool = False) -> str:
             f'<div style="background:#FFFFFF;border-radius:10px;padding:10px 12px;margin-top:8px;font-size:14px">'
             f'<span style="display:inline-block;width:10px;height:10px;border-radius:99px;background:{dot[x["status"]][0]}"></span> '
             f'<b>{_e(x["check"])}</b> · <b style="color:{dot[x["status"]][0]}">{dot[x["status"]][1]}</b><br>'
-            (f'<span style="color:#5F6672">{_e(x["note"])}</span><br>' if x["note"].strip() else '') + f'<i style="color:#9A938C">"{_e(x["evidence"])}"</i></div>' for x in comp["checks"])
+            + (f'<span style="color:#5F6672">{_e(x["note"])}</span><br>' if x["note"].strip() else '') + f'<i style="color:#9A938C">"{_e(x["evidence"])}"</i></div>' for x in comp["checks"])
         compliance_html = (f'<div style="{card}background:{bg};border:2px solid {col}">'
                            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
                            f'<td width="40" valign="top"><div style="background:#26282E;border-radius:12px;padding:4px 6px">{lights}</div></td>'
@@ -256,7 +271,7 @@ def business_report(call: dict, inline_images: bool = False) -> str:
     {_e(call['created_at'])} · סוג: {CATEGORIES.get(a['category'], '')} · סטטוס: {STATUS.get(a['status'], '')} · קובץ: {_e(call.get('filename') or '-')}</p>
   </div>
   <div style="height:16px"></div>
-  {compliance_html}{policy}{risks}
+  {conduct_html}{compliance_html}{policy}{risks}
   <div style="{card}"><p style="{h3}">📝 סיכום לתיק</p><p style="{p}">{_e(a['summary'])}</p></div>
   {meet}
   {emotion}
@@ -352,7 +367,14 @@ def email_mode() -> str:
     return "none"
 
 
-def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None = None) -> dict:
+def conduct_needs_manager(a: dict) -> bool:
+    """הנציג דיבר בצורה מזלזלת/מקצינה, וזה מעלה את סיכון הנטישה → הדוח יוצא גם למנהל/ת."""
+    rc = a.get("rep_conduct") or {}
+    return bool(rc.get("issue") and rc.get("raises_churn"))
+
+
+def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None = None,
+                 send_customer: bool = True) -> dict:
     """יוצר את הדוחות וה-PDF ושולח מייל לכל לקוח בשיחה.
     EMAIL_TEST_RECIPIENT ב-.env: כל המיילים מופנים לכתובת אחת (לדמו - כדי לא לשלוח לכתובות אמיתיות/מומצאות)."""
     call = db.get_call(call_id)
@@ -376,7 +398,9 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
     test_to = [x.strip() for x in os.getenv("EMAIL_TEST_RECIPIENT", "").split(",") if x.strip()]
     business_to = [x.strip() for x in os.getenv("BUSINESS_EMAIL", "").split(",") if x.strip()]
     sent_to, failed = [], []
-    if not people and test_to:
+    if not send_customer:
+        people = []  # הנציג לא בחר לשלוח סיכום ללקוח (ברירת המחדל)
+    elif not people and test_to:
         # מצב דמו: ללקוח אין מייל בתיק - שולחים את הסיכום ללקוח לכתובות הדמו, כדי שיהיה אפשר לראות אותו
         people = [(call["customer"].get("name") or "", "")]
     for name, email in people:
@@ -398,6 +422,20 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
             failed.append(f"עסק {to}: {e}")
     if biz_sent:
         notes.append(f"דוח לעסק נשלח ל-{len(biz_sent)} כתובות")
+    if not send_customer:
+        notes.append("לא נשלח מייל ללקוח (לפי בחירת הנציג)")
+
+    # הסלמה למנהל/ת: הנציג דיבר בצורה מזלזלת/מקצינה וזה מעלה את סיכון הנטישה
+    if conduct_needs_manager(call["analysis"]):
+        manager = db.get_manager_email()
+        subject = (f"⚠️ התנהלות נציג בשיחה עם {call['customer'].get('name')} · סיכון נטישה {call['analysis']['churn_risk']}%"
+                   + (f" [דמו - במקור ל: {manager}]" if test_to else ""))
+        try:
+            for to in test_to or [manager]:
+                _send(to, subject, business_report(call, inline_images=True), pdfs["business"], inline=True)
+            notes.append(f"🚨 הדוח נשלח למנהל/ת ({manager}) בגלל התנהלות הנציג")
+        except Exception as e:  # noqa: BLE001
+            failed.append(f"מנהל/ת {manager}: {e}")
 
     via = "Gmail API" if mode == "gmail-api" else "SMTP"
     if sent_to:

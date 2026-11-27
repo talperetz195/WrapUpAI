@@ -72,6 +72,21 @@
       <button class="secondary" style="margin-top:6px;width:100%" onclick="addTerm()">הוספה</button>
     </div>
     <div class="card">
+      <h2>🧑‍💼 מנהל/ת צוות</h2>
+      <p class="muted">כשנציג מדבר בצורה מזלזלת או מקצינה כלפי הלקוח, וזה מעלה את סיכון הנטישה, הדוח נשלח אוטומטית גם לכתובת הזו.</p>
+      <input id="manager-email" dir="ltr" placeholder="manager@company.com">
+      <button class="secondary" style="margin-top:6px;width:100%" onclick="saveManager(this)">שמירה</button>
+    </div>
+    <div class="card">
+      <h2>🚦 בדיקות ציות רגולטורי</h2>
+      <p class="muted">בדיקה אחת בכל שורה. כל שיחה נבדקת מול הרשימה ומקבלת רמזור: ירוק תקין, צהוב לאימות, אדום חסר, עם ציטוט מהשיחה.</p>
+      <textarea id="compliance" style="min-height:150px"></textarea>
+      <div class="row" style="margin-top:6px">
+        <button class="secondary" onclick="resetCompliance()">ברירת מחדל</button>
+        <button class="secondary" onclick="saveCompliance(this)">שמירת בדיקות</button>
+      </div>
+    </div>
+    <div class="card">
       <h2>🛡️ תקנון / תנאי פוליסה</h2>
       <p class="muted">Policy Guard משווה כל הבטחה של הנציג מול התקנון הזה ומתריע על סתירות.</p>
       <textarea id="policy" placeholder="הדביקו כאן את התקנון, תנאי הביטול, העמלות..."></textarea>
@@ -318,7 +333,24 @@ async function savePolicy(btn) {
   btn.textContent = "✔ נשמר"; setTimeout(() => (btn.textContent = "שמירת תקנון"), 1500);
 }
 
-loadStatus(); loadCustomers(); loadGlossary(); loadJobs(); loadPolicy();
+let complianceDefaults = "";
+async function loadCompliance() { const c = await api("/api/compliance"); document.getElementById("compliance").value = c.text; complianceDefaults = c.defaults; }
+async function saveCompliance(btn) {
+  await api("/api/compliance", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: document.getElementById("compliance").value }) });
+  btn.textContent = "✔ נשמר"; setTimeout(() => (btn.textContent = "שמירת בדיקות"), 1500);
+}
+function resetCompliance() { document.getElementById("compliance").value = complianceDefaults; }
+
+async function loadManager() { document.getElementById("manager-email").value = (await api("/api/manager-email")).email; }
+async function saveManager(btn) {
+  try {
+    await api("/api/manager-email", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: document.getElementById("manager-email").value }) });
+    btn.textContent = "✔ נשמר";
+  } catch (e) { btn.textContent = e.message; }
+  setTimeout(() => (btn.textContent = "שמירה"), 1800);
+}
+
+loadStatus(); loadCustomers(); loadGlossary(); loadJobs(); loadPolicy(); loadCompliance(); loadManager();
 setInterval(loadJobs, 3000);
 </script>
 </body>

@@ -30,6 +30,7 @@ from pathlib import Path
 
 import requests
 
+import deliver
 from pipeline import process_file
 
 log = logging.getLogger("bridge")
@@ -254,6 +255,8 @@ def _run_job(body: dict) -> None:
             hint = {"name": name} if name else {}
             result = process_file(path, source="api:מרכזיית הצוות", display_name=path.name,
                                   customer_hint=hint, recipients=recipients,
+                                  # מייל ללקוח רק אם הנציג בחר במרכזייה (ברירת מחדל: לא)
+                                  send_customer=bool(body.get("sendCustomerEmail", False)),
                                   on_progress=lambda st: _status(job_id, TEAM_STAGE[st]))
         pdfs = result.get("pdfs") or {}
         biz, cust = _pdf_payload(pdfs.get("business")), _pdf_payload(pdfs.get("customer"))
@@ -264,6 +267,9 @@ def _run_job(body: dict) -> None:
                 "delivery": result["delivery"],
                 "sentTo": result.get("sent_to", []),
                 "sentiment": sentiment_for_team(result["analysis"]),
+                "repConduct": {**(result["analysis"].get("rep_conduct") or {}),
+                               "managerNotified": deliver.conduct_needs_manager(result["analysis"])},
+                "customerEmailSent": bool(body.get("sendCustomerEmail", False)),
                 "compliance": compliance_for_team(result["analysis"]),
                 "fieldUpdates": field_updates_for_team(result["analysis"]),
                 "intents": [{"intent": i["intent"], "label": INTENT_LABEL[i["intent"]], "description": i["description"],

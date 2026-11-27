@@ -212,6 +212,23 @@ class Compliance(BaseModel):
     text: str
 
 
+class ManagerEmail(BaseModel):
+    email: str
+
+
+@app.get("/api/manager-email")
+def get_manager_email():
+    return {"email": db.get_manager_email()}
+
+
+@app.put("/api/manager-email")
+def put_manager_email(m: ManagerEmail):
+    if "@" not in m.email:
+        raise HTTPException(400, "כתובת מייל לא תקינה")
+    db.set_manager_email(m.email)
+    return {"ok": True}
+
+
 @app.get("/api/compliance")
 def get_compliance():
     return {"text": "\n".join(db.get_compliance_checks()), "defaults": "\n".join(db.DEFAULT_COMPLIANCE)}
