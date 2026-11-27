@@ -108,6 +108,23 @@ class CustomerIntent(BaseModel):
     evidence: str = Field(description="ציטוט מדויק מהשיחה")
 
 
+class ConductIssue(BaseModel):
+    kind: Literal["dismissive", "condescending", "aggressive", "escalating", "interrupting", "other"] = Field(
+        description="dismissive = מזלזל/מבטל; condescending = מתנשא; aggressive = תוקפני/צועק; escalating = מקצין/מסלים; interrupting = קוטע שוב ושוב"
+    )
+    quote: str = Field(description="ציטוט מדויק של הנציג מהתמלול")
+    explanation: str = Field(description="משפט קצר: למה זה פוגע בלקוח")
+
+
+class RepConduct(BaseModel):
+    """התנהלות הנציג כלפי הלקוח."""
+    issue: bool = Field(description="true רק אם הנציג דיבר בצורה מזלזלת, מתנשאת, תוקפנית או מקצינה כלפי הלקוח")
+    severity: Literal["none", "low", "medium", "high"]
+    raises_churn: bool = Field(description="true אם ההתנהלות של הנציג מעלה את הסיכוי שהלקוח יעזוב")
+    issues: list[ConductIssue] = Field(description="המקרים עם ציטוטים. ריק אם אין בעיה")
+    summary: str = Field(description="משפט אחד למנהל/ת: מה קרה ומה ההשפעה על הלקוח. ריק אם אין בעיה")
+
+
 class SpeakerRole(BaseModel):
     label: str = Field(description="התווית כפי שמופיעה בתמלול, למשל 'דובר 1'")
     role: str = Field(description="תפקיד בשיחה: 'נציג שירות', 'לקוח', 'בן/בת זוג של הלקוח', 'סוכן' וכו'")
@@ -153,6 +170,7 @@ class CallAnalysis(BaseModel):
     customer_intents: list[CustomerIntent] = Field(
         description="כוונות שהלקוח הביע ('אני שוקל לעבור', 'אולי אבטל'). כוונה אינה עובדה ולא משנה את התיק"
     )
+    rep_conduct: RepConduct = Field(description="האם הנציג דיבר בצורה מזלזלת או מקצינה כלפי הלקוח")
     rep_recommendation: str = Field(
         description="המלצה לנציג: 1-2 משפטים מעשיים מה כדאי לעשות עכשיו מול הלקוח, לפי הרגש שלו בסיום והבעיות שנשארו פתוחות"
     )

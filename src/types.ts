@@ -108,6 +108,21 @@ export interface WrapUpCompliance {
   checks: Array<{ check: string; status: 'pass' | 'warning' | 'fail'; evidence: string; note: string }>;
 }
 
+/** WrapUpAI: התנהלות הנציג כלפי הלקוח (זלזול / הקצנה) */
+export interface WrapUpRepConduct {
+  issue: boolean;
+  severity: 'none' | 'low' | 'medium' | 'high';
+  raises_churn: boolean;
+  issues: Array<{
+    kind: 'dismissive' | 'condescending' | 'aggressive' | 'escalating' | 'interrupting' | 'other';
+    quote: string;
+    explanation: string;
+  }>;
+  summary: string;
+  /** האם הדוח נשלח אוטומטית גם למנהל/ת הצוות */
+  managerNotified?: boolean;
+}
+
 /** WrapUpAI: עדכון שדה בתיק הלקוח. סיכון נמוך = אוטומטי; סיכון גבוה / לא ודאי = נעול לאישור הנציג */
 export interface WrapUpFieldUpdate {
   id: string;
@@ -127,6 +142,8 @@ export interface WrapUpDelivery {
   sentTo: string[];
   sentiment?: WrapUpSentiment;
   compliance?: WrapUpCompliance;
+  repConduct?: WrapUpRepConduct;
+  customerEmailSent?: boolean;
   fieldUpdates?: WrapUpFieldUpdate[];
   intents?: Array<{ intent: string; label: string; description: string; evidence: string }>;
   pdfFileName?: string | null;
