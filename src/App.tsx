@@ -474,6 +474,7 @@ export default function App() {
                   token={token}
                   recordings={snapshot.recordings}
                   customers={snapshot.customers}
+                  reports={snapshot.reports}
                   selectedRecordingId={selectedRecordingId}
                   onSelectRecording={setSelectedRecordingId}
                   onTransferToExternal={handleTransferToExternal}
