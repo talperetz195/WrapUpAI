@@ -44,6 +44,31 @@ export async function loginOperator(passcode: string): Promise<AuthSessionRespon
   return handleJson<AuthSessionResponse>(res);
 }
 
+/** WrapUpAI: החלטה על עדכון שדה נעול (approve / reject / reset), עם ערך ערוך אופציונלי */
+export async function decideFieldUpdate(
+  token: string,
+  reportId: string,
+  updateId: string,
+  action: 'approve' | 'reject' | 'reset',
+  value?: string
+): Promise<SystemSnapshot> {
+  const res = await fetch(`/api/internal/reports/${encodeURIComponent(reportId)}/field-updates/${encodeURIComponent(updateId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action, value }),
+  });
+  return handleJson<SystemSnapshot>(res);
+}
+
+/** WrapUpAI: שמירת כל העדכונים שאושרו בתיק הלקוח */
+export async function commitFieldUpdates(token: string, reportId: string): Promise<SystemSnapshot & { saved: number }> {
+  const res = await fetch(`/api/internal/reports/${encodeURIComponent(reportId)}/field-updates/commit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleJson<SystemSnapshot & { saved: number }>(res);
+}
+
 /** WrapUpAI: עדכון כתובות המייל של לקוח (ריק = כתובת דוגמה אוטומטית) */
 export async function updateCustomerEmails(token: string, customerId: string, emails: string): Promise<SystemSnapshot> {
   const res = await fetch(`/api/internal/customers/${encodeURIComponent(customerId)}/emails`, {

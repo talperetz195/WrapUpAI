@@ -91,6 +91,18 @@ def ensure_assets(chrome: str | None) -> dict[str, Path]:
     return {n: ASSETS / f"{n}.png" for n in wanted if (ASSETS / f"{n}.png").exists()}
 
 
+def gauge_png(score: int, chrome: str | None) -> Path | None:
+    """מחוג עם הציון האמיתי של השיחה (למייל לנציג). נשמר במטמון לפי ציון."""
+    ASSETS.mkdir(exist_ok=True)
+    out = ASSETS / f"gauge_{int(score)}.png"
+    if not out.exists() and chrome:
+        try:
+            _render_png(_gauge_svg(int(score), 600), 600, round(600 * 0.56), out, chrome)
+        except (subprocess.SubprocessError, OSError):
+            return None
+    return out if out.exists() else None
+
+
 def data_uri(path: Path) -> str:
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
 

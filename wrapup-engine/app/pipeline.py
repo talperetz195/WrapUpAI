@@ -38,7 +38,7 @@ def process_file(path: Path, source: str, customer_id: int | None = None,
         raw = transcribe_file(path, list(glossary))              # 1. תמלול (עם מונחי העסק)
         clean, removed = redact(raw)                             # 2. סינון
         progress("analyzing")
-        analysis = analyzer.analyze(clean, glossary, db.get_policy())
+        analysis = analyzer.analyze(clean, glossary, db.get_policy(), compliance=db.get_compliance_checks())
         if hint.get("name"):  # השם במערכת העסק הוא הקובע (לא מה שה-AI הסיק מהשיחה)
             analysis.customer.name = hint["name"]  # 3. ניתוח + Policy Guard
         saved = db.save_call(analysis, clean, removed, name, customer_id,

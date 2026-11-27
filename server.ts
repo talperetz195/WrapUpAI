@@ -17,7 +17,18 @@ import {
 } from './server/security.ts';
 import { store } from './server/store.ts';
 import { isAzureTtsConfigured, synthesizeDialogueWithAzure } from './server/azureTts.ts';
-import type { CallAnalysisReport, DialogueTurn, ExternalTransferPayload, PbxRecording, TransferJob, WrapUpSentiment } from './server/types.ts';
+import type {
+  CallAnalysisReport,
+  CustomerRecord,
+  DialogueTurn,
+  ExternalTransferPayload,
+  PbxRecording,
+  TransferJob,
+  WrapUpCompliance,
+  WrapUpDelivery,
+  WrapUpFieldUpdate,
+  WrapUpSentiment,
+} from './server/types.ts';
 
 const PORT = 3000;
 const ALLOWED_AUDIO_MIMES = new Set([
@@ -197,6 +208,34 @@ async function ensureRecordingAudio(recordingId: string): Promise<{ buffer: Buff
   rec.mimeType = synthesized.mimeType;
   store.setAudio(recordingId, synthesized.buffer, synthesized.mimeType);
   return { buffer: synthesized.buffer, mimeType: synthesized.mimeType };
+}
+
+// WrapUpAI: החלת עדכון שדה על תיק הלקוח (פרטי קשר לשדות הקיימים, השאר לשדות CRM נוספים)
+function applyFieldUpdate(customer: CustomerRecord, u: WrapUpFieldUpdate, actor: string): void {
+  if (u.field === 'phone') {
+    u.previousValue = customer.phone;
+    customer.phone = u.newValue;
+  } else if (u.field === 'city') {
+    u.previousValue = customer.city;
+    customer.city = u.newValue;
+  } else if (u.field === 'email') {
+    u.previousValue = (customer.emails || []).join(', ');
+    customer.emails = [u.newValue, ...(customer.emails || []).filter((e) => e !== u.newValue && !e.endsWith('@example.com'))];
+  } else {
+    customer.crmFields = { ...(customer.crmFields || {}) };
+    u.previousValue = customer.crmFields[u.label];
+    customer.crmFields[u.label] = u.newValue;
+  }
+  u.status = 'saved';
+  u.decidedBy = actor;
+  store.addAuditLog({
+    actor,
+    system: 'customer_crm',
+    action: 'עדכון שדה בתיק הלקוח מתוך שיחה',
+    resource: `${customer.fullName} · ${u.label}`,
+    outcome: 'approved',
+    details: `${u.label}: "${u.previousValue || '—'}" ← "${u.newValue}" (ציטוט: "${u.evidence}")`,
+  });
 }
 
 async function executeIsolatedExternalAnalysis(params: {
@@ -856,6 +895,9 @@ async function startServer(): Promise<void> {
         customerPdfFileName?: string | null;
         customerPdfBase64?: string | null;
         sentiment?: WrapUpSentiment;
+        compliance?: WrapUpCompliance;
+        fieldUpdates?: WrapUpFieldUpdate[];
+        intents?: WrapUpDelivery['intents'];
       };
       jobId: string;
       analysis: {
@@ -910,7 +952,16 @@ async function startServer(): Promise<void> {
         pdfFileName: wrapup.pdfBase64 ? wrapup.pdfFileName || `${reportId}.pdf` : null,
         customerPdfFileName: wrapup.customerPdfBase64 ? wrapup.customerPdfFileName || `${reportId}-customer.pdf` : null,
         sentiment: wrapup.sentiment,
+        compliance: wrapup.compliance,
+        fieldUpdates: wrapup.fieldUpdates || [],
+        intents: wrapup.intents || [],
       };
+      // סיכון נמוך (פרטי קשר ודאיים) נשמר אוטומטית בתיק הלקוח
+      for (const u of report.wrapup.fieldUpdates || []) {
+        if (u.status === 'auto_approved') {
+          applyFieldUpdate(customer, u, 'WrapUpAI · עדכון אוטומטי (סיכון נמוך)');
+        }
+      }
     }
 
     // Replace older report for the same recording if re-analyzed, otherwise prepend
@@ -963,6 +1014,44 @@ async function startServer(): Promise<void> {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(fs.readFileSync(file));
+  });
+
+  // WrapUpAI: החלטת הנציג על עדכון שדה נעול (אשר / ערוך / דחה)
+  app.patch('/api/internal/reports/:reportId/field-updates/:updateId', requireOperatorAuth, (req, res) => {
+    const report = store.reports.find((r) => r.id === req.params.reportId);
+    const u = report?.wrapup?.fieldUpdates?.find((x) => x.id === req.params.updateId);
+    if (!report || !u) {
+      res.status(404).json({ error: 'העדכון לא נמצא.' });
+      return;
+    }
+    if (u.status === 'saved' || u.status === 'auto_approved') {
+      res.status(409).json({ error: 'העדכון כבר נשמר בתיק.' });
+      return;
+    }
+    const { action, value } = (req.body || {}) as { action?: 'approve' | 'reject' | 'reset'; value?: string };
+    if (typeof value === 'string' && value.trim()) u.newValue = value.trim();
+    u.status = action === 'reject' ? 'rejected' : action === 'reset' ? 'pending' : 'approved';
+    u.decidedBy = req.operator!.operatorName;
+    store.save();
+    const snapshot = buildMaskedSnapshot();
+    store.broadcast('state_update', snapshot);
+    res.json(snapshot);
+  });
+
+  // WrapUpAI: "אשר ושמור ב-CRM" - שומר בתיק הלקוח את כל העדכונים שהנציג אישר
+  app.post('/api/internal/reports/:reportId/field-updates/commit', requireOperatorAuth, (req, res) => {
+    const report = store.reports.find((r) => r.id === req.params.reportId);
+    const customer = report ? store.customers.find((c) => c.id === report.customerId) : undefined;
+    if (!report || !customer) {
+      res.status(404).json({ error: 'הדוח לא נמצא.' });
+      return;
+    }
+    const approved = (report.wrapup?.fieldUpdates || []).filter((u) => u.status === 'approved');
+    for (const u of approved) applyFieldUpdate(customer, u, req.operator!.operatorName);
+    store.save();
+    const snapshot = buildMaskedSnapshot();
+    store.broadcast('state_update', snapshot);
+    res.json({ saved: approved.length, ...snapshot });
   });
 
   // ADD INDIVIDUAL TASK TO CUSTOMER CALENDAR

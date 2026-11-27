@@ -302,3 +302,27 @@ def latest_feedback_score(call_id: int) -> int | None:
         row = conn.execute("SELECT score FROM feedback WHERE call_id = ? AND score IS NOT NULL ORDER BY id DESC LIMIT 1",
                            (call_id,)).fetchone()
         return row["score"] if row else None
+
+
+# ---------- בקרת ציות: רשימת הבדיקות של העסק (ניתנת לעריכה) ----------
+
+DEFAULT_COMPLIANCE = [
+    "הודעה על הקלטת השיחה: הנציג הודיע ללקוח בתחילת השיחה שהשיחה מוקלטת",
+    "זיהוי לקוח: הנציג אימת את זהות הלקוח לפני שמסר או שינה מידע אישי",
+    "גילוי נאות על עלויות ועמלות: הנציג הציג עלויות, עמלות ותנאים מהותיים לפני שהלקוח הסכים",
+    "אימות סכומים ותאריכים: כל סכום או תאריך שסוכם נאמר בבירור ובאופן חד-משמעי",
+]
+
+
+def get_compliance_checks() -> list[str]:
+    with connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'compliance'").fetchone()
+    if row is None:
+        return list(DEFAULT_COMPLIANCE)
+    return [line.strip() for line in row["value"].splitlines() if line.strip()]
+
+
+def set_compliance_checks(lines: list[str]) -> None:
+    with connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('compliance', ?)",
+                     ("\n".join(x.strip() for x in lines if x.strip()),))

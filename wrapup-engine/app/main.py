@@ -208,6 +208,21 @@ class Policy(BaseModel):
     text: str
 
 
+class Compliance(BaseModel):
+    text: str
+
+
+@app.get("/api/compliance")
+def get_compliance():
+    return {"text": "\n".join(db.get_compliance_checks()), "defaults": "\n".join(db.DEFAULT_COMPLIANCE)}
+
+
+@app.put("/api/compliance")
+def put_compliance(c: Compliance):
+    db.set_compliance_checks(c.text.splitlines() or db.DEFAULT_COMPLIANCE)
+    return {"ok": True, "count": len(db.get_compliance_checks())}
+
+
 @app.get("/api/policy")
 def get_policy():
     return {"text": db.get_policy()}

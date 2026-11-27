@@ -140,6 +140,11 @@ def sentiment_for_team(a: dict) -> dict:
     }
 
 
+from classify import INTENT_LABEL
+from classify import compliance as compliance_for_team
+from classify import field_updates as field_updates_for_team
+
+
 def to_team_report(a: dict, transcript: str) -> dict:
     roles = {s["label"]: s["role"] for s in a.get("speakers", [])}
     rep_label = next((s["label"] for s in a.get("speakers", []) if "נציג" in s["role"]), "נציג")
@@ -181,7 +186,11 @@ def to_team_report(a: dict, transcript: str) -> dict:
     if nm:
         tasks.insert(0, _task(nm["title"], f"עם: {nm.get('with_whom') or '-'} · {nm.get('location') or ''}",
                               nm.get("with_whom") or "נציג מטפל", "תיאום פגישה", "גבוהה", nm.get("date"), nm.get("time")))
-    if a["churn_risk"] >= 60:
+    for it in a.get("customer_intents") or []:
+        tasks.append(_task(f"משימת שימור · הלקוח {INTENT_LABEL[it['intent']]}",
+                           f"כוונה בלבד, לא עובדה: לא לשנות את התיק. ציטוט: \"{it['evidence']}\"",
+                           "ראש צוות", "מעקב פנימי", "דחופה", None, None))
+    if a["churn_risk"] >= 60 and not a.get("customer_intents"):
         tasks.append(_task("שימור לקוח - סיכון נטישה גבוה", a["churn_reason"], "ראש צוות", "מעקב פנימי",
                            "דחופה", None, None))
     if a["policy_conflicts"]:
@@ -255,6 +264,10 @@ def _run_job(body: dict) -> None:
                 "delivery": result["delivery"],
                 "sentTo": result.get("sent_to", []),
                 "sentiment": sentiment_for_team(result["analysis"]),
+                "compliance": compliance_for_team(result["analysis"]),
+                "fieldUpdates": field_updates_for_team(result["analysis"]),
+                "intents": [{"intent": i["intent"], "label": INTENT_LABEL[i["intent"]], "description": i["description"],
+                             "evidence": i["evidence"]} for i in result["analysis"].get("customer_intents") or []],
                 # PDF לארגון: סיכום הפגישה + תחושות הלקוח (מפה רגשית, סיכון נטישה)
                 "pdfFileName": biz["fileName"],
                 "pdfBase64": biz["base64"],
