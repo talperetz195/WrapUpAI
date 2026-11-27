@@ -489,6 +489,8 @@ export default function App() {
                 <ExternalSystemView
                   transferJobs={snapshot.transferJobs}
                   reports={snapshot.reports}
+                  customers={snapshot.customers}
+                  auditLogs={snapshot.auditLogs}
                   onOpenCustomerReport={handleOpenCustomerReport}
                   onOpenPdf={setPdfReportId}
                 />
