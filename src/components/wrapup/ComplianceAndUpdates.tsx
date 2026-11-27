@@ -10,6 +10,15 @@ const LIGHT = {
   yellow: { color: '#C77A12', bg: '#FFF4D6', title: 'דורש אימות', sub: 'יש פרטים שצריך לוודא מול הלקוח' },
   red: { color: '#E5534B', bg: '#FDECEC', title: 'חסר רכיב חובה', sub: 'יש בדיקה שלא בוצעה בשיחה' },
 } as const;
+const SEVERITY = { none: 'ללא', low: 'נמוכה', medium: 'בינונית', high: 'גבוהה' } as const;
+const CONDUCT_KIND = {
+  dismissive: 'מזלזל',
+  condescending: 'מתנשא',
+  aggressive: 'תוקפני',
+  escalating: 'מקצין',
+  interrupting: 'קוטע',
+  other: 'אחר',
+} as const;
 const CHECK = {
   pass: { dot: '#2F9E6A', label: 'תקין' },
   warning: { dot: '#E0A43A', label: 'לאימות' },
@@ -35,7 +44,8 @@ export const ComplianceAndUpdates: React.FC<{ token: string; report: CallAnalysi
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  if (!w || (!w.compliance && !w.fieldUpdates?.length && !w.intents?.length)) return null;
+  const conduct = w?.repConduct?.issue ? w.repConduct : null;
+  if (!w || (!w.compliance && !conduct && !w.fieldUpdates?.length && !w.intents?.length)) return null;
 
   const decide = async (u: WrapUpFieldUpdate, action: 'approve' | 'reject' | 'reset', value?: string) => {
     setBusy(true);
@@ -69,6 +79,35 @@ export const ComplianceAndUpdates: React.FC<{ token: string; report: CallAnalysi
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      {conduct && (
+        <section className="xl:col-span-2 rounded-xl border-2 border-[#E5534B] bg-[#FDECEC] p-4 space-y-3" role="alert">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl leading-none" aria-hidden>⚠️</span>
+            <div className="flex-1 space-y-1">
+              <div className="text-xs font-bold tracking-wide text-slate-500">התנהלות הנציג</div>
+              <div className="text-lg font-extrabold text-[#C23A33]">הנציג דיבר בצורה פוגעת כלפי הלקוח</div>
+              {conduct.summary.trim() && <div className="text-sm text-slate-700">{conduct.summary}</div>}
+              <div className="flex flex-wrap gap-2 pt-1 text-xs font-bold">
+                <span className="px-2 py-0.5 rounded-full bg-white text-[#C23A33]">חומרה: {SEVERITY[conduct.severity] ?? conduct.severity}</span>
+                {conduct.raises_churn && <span className="px-2 py-0.5 rounded-full bg-white text-[#C23A33]">מעלה סיכון נטישה</span>}
+                {conduct.managerNotified && <span className="px-2 py-0.5 rounded-full bg-white text-[#5B4CF0]">📨 הדוח נשלח למנהל/ת הצוות</span>}
+              </div>
+            </div>
+          </div>
+          {conduct.issues.length > 0 && (
+            <ul className="space-y-2">
+              {conduct.issues.map((it, i) => (
+                <li key={i} className="bg-white rounded-lg px-3 py-2 text-xs space-y-0.5">
+                  <span className="font-bold text-[#C23A33]">{CONDUCT_KIND[it.kind] ?? it.kind}</span>
+                  <div className="text-slate-500 italic">"{it.quote}"</div>
+                  {it.explanation.trim() && <div className="text-slate-700">{it.explanation}</div>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       {w.compliance && (
         <section className="rounded-xl border p-4 space-y-3" style={{ background: LIGHT[w.compliance.overall].bg, borderColor: LIGHT[w.compliance.overall].color }}>
           <div className="flex items-center gap-3">

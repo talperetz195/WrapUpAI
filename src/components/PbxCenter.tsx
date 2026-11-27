@@ -36,7 +36,7 @@ interface PbxCenterProps {
   reports: CallAnalysisReport[];
   selectedRecordingId: string | null;
   onSelectRecording: (recordingId: string) => void;
-  onTransferToExternal: (recordingId: string) => Promise<void>;
+  onTransferToExternal: (recordingId: string, sendCustomerEmail?: boolean) => Promise<void>;
   onOpenCustomerReport: (customerId: string, reportId?: string) => void;
   onOpenPdf: (reportId: string) => void;
   onSnapshotUpdate: (snapshot: SystemSnapshot) => void;
@@ -131,6 +131,8 @@ export const PbxCenter: React.FC<PbxCenterProps> = ({
   onSnapshotUpdate,
   transferringId,
 }) => {
+  // WrapUpAI: האם לשלוח סיכום במייל גם ללקוח (כבוי כברירת מחדל)
+  const [sendCustomerEmail, setSendCustomerEmail] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'processing' | 'returned'>('all');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
@@ -604,7 +606,7 @@ export const PbxCenter: React.FC<PbxCenterProps> = ({
             </div>
             <div className="flex flex-wrap gap-2.5">
               <button
-                onClick={() => onTransferToExternal(selectedRecording.id)}
+                onClick={() => onTransferToExternal(selectedRecording.id, sendCustomerEmail)}
                 disabled={transferringId === selectedRecording.id || selectedRecording.status === 'analyzing_external'}
                 className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold bg-[#5B4CF0] hover:bg-[#4A3BDF] disabled:bg-[#A79CF8] text-white rounded-xl"
               >
@@ -635,6 +637,23 @@ export const PbxCenter: React.FC<PbxCenterProps> = ({
                   </button>
                 </>
               )}
+              <label
+                className="inline-flex items-center gap-2.5 px-3 py-2 text-sm font-semibold text-[#1E1B4B] bg-[#F4F5F9] rounded-xl cursor-pointer select-none"
+                title="אם מסומן, WrapUpAI ישלח ללקוח מייל עם סיכום השיחה"
+              >
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={sendCustomerEmail}
+                  onClick={() => setSendCustomerEmail((v) => !v)}
+                  className={`relative w-10 h-6 rounded-full transition-colors ${sendCustomerEmail ? 'bg-[#2F9E6A]' : 'bg-[#C9CCD6]'}`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${sendCustomerEmail ? 'right-[18px]' : 'right-0.5'}`}
+                  />
+                </button>
+                📧 שלח סיכום גם ללקוח
+              </label>
             </div>
           </div>
 

@@ -440,7 +440,7 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
     via = "Gmail API" if mode == "gmail-api" else "SMTP"
     if sent_to:
         notes.insert(0, f"📧 נשלח ב-{via} ל-{len(sent_to)} לקוחות: {', '.join(sent_to)}")
-    elif not people:
+    elif send_customer and not people:
         notes.append("אין מייל ללקוח בתיק")
     if failed:
         notes.append("שליחה נכשלה: " + "; ".join(failed))

@@ -148,11 +148,13 @@ export async function revealCustomerId(token: string, customerId: string): Promi
 
 export async function transferRecordingToExternal(
   token: string,
-  recordingId: string
+  recordingId: string,
+  sendCustomerEmail = false
 ): Promise<{ job: TransferJob; snapshot: SystemSnapshot }> {
   const res = await fetch(`/api/internal/recordings/${encodeURIComponent(recordingId)}/transfer`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sendCustomerEmail }),
   });
   return handleJson<{ job: TransferJob; snapshot: SystemSnapshot }>(res);
 }

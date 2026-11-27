@@ -25,6 +25,7 @@ import type {
   PbxRecording,
   TransferJob,
   WrapUpCompliance,
+  WrapUpRepConduct,
   WrapUpDelivery,
   WrapUpFieldUpdate,
   WrapUpSentiment,
@@ -244,8 +245,9 @@ async function executeIsolatedExternalAnalysis(params: {
   audioBuffer: Buffer;
   mimeType: string;
   internalPort: number;
+  sendCustomerEmail: boolean;
 }): Promise<void> {
-  const { transferToken, job, audioBuffer, mimeType, internalPort } = params;
+  const { transferToken, job, audioBuffer, mimeType, internalPort, sendCustomerEmail } = params;
 
   try {
     // Call isolated System B HTTP endpoint over localhost boundary using ONLY the scoped single-use token
@@ -274,6 +276,8 @@ async function executeIsolatedExternalAnalysis(params: {
         deliveryRecipients,
         // שם הלקוח לפנייה במייל ולשם קובץ ה-PDF בלבד (לא נשלח למודל ה-AI)
         deliveryCustomerName: customer?.fullName || '',
+        // האם הנציג בחר לשלוח סיכום במייל גם ללקוח (ברירת מחדל: לא)
+        sendCustomerEmail,
       }),
     });
 
@@ -739,7 +743,11 @@ async function startServer(): Promise<void> {
 
   // ONE-CLICK TRANSFER TO RESTRICTED EXTERNAL SYSTEM
   // (WrapUpAI: הלוגיקה הועברה לפונקציה כדי שהמרכזייה תוכל גם להעביר אוטומטית כל הקלטה חדשה)
-  async function startExternalTransfer(rec: PbxRecording, actorName: string): Promise<TransferJob> {
+  async function startExternalTransfer(
+    rec: PbxRecording,
+    actorName: string,
+    sendCustomerEmail = false
+  ): Promise<TransferJob> {
     const { buffer, mimeType } = await ensureRecordingAudio(rec.id);
 
     const jobId = `JOB-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
@@ -795,6 +803,16 @@ async function startServer(): Promise<void> {
       details:
         'הונפק טוקן HMAC חד-פעמי (תוקף 120 שניות, הרשאת אודיו בלבד). הוסרו 7 שדות PII מזהים טרם היציאה.',
     });
+    store.addAuditLog({
+      actor: actorName,
+      system: 'security_gateway',
+      action: sendCustomerEmail ? 'הנציג בחר לשלוח סיכום במייל ללקוח' : 'ללא מייל ללקוח (בחירת ברירת מחדל)',
+      resource: `${rec.uniqueCallName} · ${jobId}`,
+      outcome: 'verified',
+      details: sendCustomerEmail
+        ? 'WrapUpAI ישלח ללקוח מייל עם סיכום השיחה וקובץ PDF.'
+        : 'הסיכום יישמר בכרטיס הלקוח וידווח לעסק בלבד. לא יישלח מייל ללקוח.',
+    });
 
     store.broadcast('state_update', buildMaskedSnapshot());
 
@@ -805,6 +823,7 @@ async function startServer(): Promise<void> {
       audioBuffer: buffer,
       mimeType,
       internalPort: PORT,
+      sendCustomerEmail,
     });
     return job;
   }
@@ -822,7 +841,8 @@ async function startServer(): Promise<void> {
         return;
       }
 
-      const job = await startExternalTransfer(rec, req.operator!.operatorName);
+      const sendCustomerEmail = (req.body as { sendCustomerEmail?: unknown } | undefined)?.sendCustomerEmail === true;
+      const job = await startExternalTransfer(rec, req.operator!.operatorName, sendCustomerEmail);
       res.status(202).json({
         job,
         snapshot: buildMaskedSnapshot(),
@@ -896,6 +916,8 @@ async function startServer(): Promise<void> {
         customerPdfBase64?: string | null;
         sentiment?: WrapUpSentiment;
         compliance?: WrapUpCompliance;
+        repConduct?: WrapUpRepConduct;
+        customerEmailSent?: boolean;
         fieldUpdates?: WrapUpFieldUpdate[];
         intents?: WrapUpDelivery['intents'];
       };
@@ -953,6 +975,8 @@ async function startServer(): Promise<void> {
         customerPdfFileName: wrapup.customerPdfBase64 ? wrapup.customerPdfFileName || `${reportId}-customer.pdf` : null,
         sentiment: wrapup.sentiment,
         compliance: wrapup.compliance,
+        repConduct: wrapup.repConduct,
+        customerEmailSent: wrapup.customerEmailSent,
         fieldUpdates: wrapup.fieldUpdates || [],
         intents: wrapup.intents || [],
       };

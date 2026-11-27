@@ -158,12 +158,12 @@ export default function App() {
     [snapshot]
   );
 
-  const handleTransferToExternal = async (recordingId: string) => {
+  const handleTransferToExternal = async (recordingId: string, sendCustomerEmail = false) => {
     if (!token) return;
     setTransferringId(recordingId);
     setLoadingError(null);
     try {
-      const res = await transferRecordingToExternal(token, recordingId);
+      const res = await transferRecordingToExternal(token, recordingId, sendCustomerEmail);
       setSnapshot(res.snapshot);
       setActionFeedback('הקובץ הועבר בצורה מאובטחת למערכת התמלול החיצונית. התראה תתקבל עם סיום הניתוח.');
       setTimeout(() => setActionFeedback(null), 5000);
