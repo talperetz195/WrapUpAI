@@ -10,3 +10,4 @@ gmail_token.json
 mock_crm/crm.db
 mock_crm/storage/
 mock_crm/pool/
+email_assets/

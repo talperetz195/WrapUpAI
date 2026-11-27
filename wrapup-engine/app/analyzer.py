@@ -42,8 +42,21 @@ Policy Guard (חשוב מאוד):
 - אם יש סתירה - הוסף/י ל-policy_conflicts עם ציטוט מדויק משני הצדדים. סמן/י רק סתירה אמיתית, לא ניסוח שונה של אותו דבר.
 - אם יש סתירה, הזכר/י אותה גם ב-customer_message בעדינות ("שימ/י לב: לפי התקנון...") כדי שהלקוח לא יופתע.
 
+בקרת ציות (רגולציה):
+- לכל בדיקה ברשימת בדיקות הציות שמצורפת: pass / warning / fail, עם ציטוט מדויק מהשיחה כהוכחה (או "לא נאמר בשיחה").
+- warning כשהדבר נעשה חלקית או כשיש אי-ודאות (למשל סכום שנאמר בשתי גרסאות). fail כשזה חסר לגמרי.
+- אם בדיקה לא רלוונטית לשיחה הזו (למשל לא דובר בכלל על עלויות או על מסירת מידע אישי) - pass עם note "לא רלוונטי בשיחה זו".
+- אל תמציא/י דרישות חוק שלא ברשימה.
+
+עדכוני שדות בתיק הלקוח, וכוונה מול עובדה:
+- field_updates רק לעובדות שהלקוח מסר או אישר: טלפון/מייל/יישוב חדש, סכום, שינוי פוליסה/מסלול.
+- certain=false אם הערך לא חד-משמעי (למשל "400 או 450", "נראה לי", תמלול מבולבל).
+- כוונה ("אני שוקל לעבור", "אולי אבטל", "אני אתלונן") אינה עובדה: היא נכנסת ל-customer_intents בלבד,
+  ולעולם לא כ-field_update של ביטול/מחיקה/שינוי פוליסה.
+
 רגש ונטישה:
-- emotion_map: רגש הלקוח בפתיחה, באמצע ובסיום, לפי מה שאמר ואיך ניסח (חזרות, שאלות "לא הבנתי", טון חריף).
+- emotion_map: רגש הלקוח בפתיחה, באמצע ובסיום, לפי מה שאמר ואיך ניסח (חזרות, שאלות "לא הבנתי", טון חריף), עם הזמן בשיחה.
+- rep_recommendation: המלצה קצרה ומעשית לנציג, מנוסחת אליו ("מומלץ ל...").
 - churn_risk 0-100: גבוה אם הלקוח כועס/מתוסכל בסוף, איים לעזוב, הבעיה לא נפתרה או קיבל הבטחה סותרת.
 - אם הלקוח סיים מבולבל/לחוץ/מתוסכל/כועס: customer_message חייב להיות פשוט במיוחד, קצר, מרגיע, עם צעד אחד ברור בכל שורה.
 - customer_message נשלח ללקוח כמו שהוא, בשם העסק: בלי להציע עזרה נוספת, בלי שאלות אליו, ובלי לדבר על "אני" כעוזר AI."""
@@ -67,10 +80,13 @@ def model_name() -> str:
     return os.getenv("AZURE_OPENAI_DEPLOYMENT", "") if mode() == "azure-openai" else CLAUDE_MODEL
 
 
-def _user_content(transcript: str, glossary: dict[str, str], policy: str, call_date: date) -> str:
+def _user_content(transcript: str, glossary: dict[str, str], policy: str, call_date: date,
+                  compliance: list[str] | None = None) -> str:
     glossary_text = "\n".join(f"- {t}: {e}" for t, e in glossary.items()) or "(ריק)"
+    checks = "\n".join(f"- {c}" for c in (compliance or [])) or "(אין)"
     return (
         f"תאריך השיחה: {call_date.isoformat()}\n\n"
+        f"רשימת בדיקות הציות של העסק:\n{checks}\n\n"
         f"מילון המונחים של העסק:\n{glossary_text}\n\n"
         f"תקנון / תנאי הפוליסה של העסק (ל-Policy Guard):\n<policy>\n{policy or '(לא הוזן תקנון)'}\n</policy>\n\n"
         f"תמלול השיחה:\n<transcript>\n{transcript}\n</transcript>"
@@ -78,11 +94,11 @@ def _user_content(transcript: str, glossary: dict[str, str], policy: str, call_d
 
 
 def analyze(transcript: str, glossary: dict[str, str], policy: str = "",
-            call_date: date | None = None) -> CallAnalysis:
+            call_date: date | None = None, compliance: list[str] | None = None) -> CallAnalysis:
     m = mode()
     if m == "demo":
         return _demo_analysis()
-    content = _user_content(transcript, glossary, policy, call_date or date.today())
+    content = _user_content(transcript, glossary, policy, call_date or date.today(), compliance)
     if m == "azure-openai":
         return _analyze_openai(content)
     return _analyze_claude(content, m)
@@ -202,13 +218,25 @@ def _demo_analysis() -> CallAnalysis:
             "at_risk": "customer", "severity": "high",
         }],
         "emotion_map": [
-            {"stage": "opening", "emotion": "stressed", "evidence": "אני לא מצליחה לשלם אותו בבת אחת"},
-            {"stage": "middle", "emotion": "confused", "evidence": "מה זה פריים פלוס 2?"},
-            {"stage": "closing", "emotion": "understanding", "evidence": "בסדר, מתאים לי"},
+            {"stage": "opening", "emotion": "stressed", "evidence": "אני לא מצליחה לשלם אותו בבת אחת", "timestamp": "00:04"},
+            {"stage": "middle", "emotion": "confused", "evidence": "מה זה פריים פלוס 2?", "timestamp": "00:31"},
+            {"stage": "closing", "emotion": "understanding", "evidence": "בסדר, מתאים לי", "timestamp": "00:58"},
         ],
         "customer_end_emotion": "understanding",
         "churn_risk": 35,
         "churn_reason": "הלקוחה בלחץ כלכלי, אבל קיבלה פתרון ויצאה מהשיחה מבינה.",
+        "compliance_checks": [
+            {"check": "הודעה על הקלטת השיחה", "status": "fail", "evidence": "לא נאמר בשיחה", "note": "הנציג לא הודיע שהשיחה מוקלטת"},
+            {"check": "זיהוי לקוח", "status": "pass", "evidence": "אפשר מספר תעודת זהות לזיהוי?", "note": "הלקוחה זוהתה לפני מסירת מידע"},
+            {"check": "גילוי נאות על עלויות ועמלות", "status": "warning", "evidence": "אין עמלה על ההסדר", "note": "נאמר שאין עמלה, בניגוד לתקנון"},
+            {"check": "אימות סכומים ותאריכים", "status": "pass", "evidence": "יוצא בערך 412 שקל וחצי לחודש", "note": "הסכומים ברורים"},
+        ],
+        "field_updates": [
+            {"field": "phone", "label": "טלפון", "new_value": "0521234567", "certain": True, "evidence": "הטלפון שמעודכן אצלנו 052-1234567, נכון? כן"},
+            {"field": "amount", "label": "סכום החזר חודשי", "new_value": "412.5 ₪", "certain": False, "evidence": "יוצא בערך 412 שקל וחצי"},
+        ],
+        "customer_intents": [],
+        "rep_recommendation": "הלקוחה הבינה את הפריסה, אבל העמלה סותרת את התקנון. מומלץ להבהיר לה בכתב לפני שהיא חותמת.",
         "sentiment": "neutral",
         "status": "pending_customer",
     })

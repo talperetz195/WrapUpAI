@@ -77,6 +77,35 @@ class EmotionPoint(BaseModel):
     stage: Literal["opening", "middle", "closing"]
     emotion: Emotion
     evidence: str = Field(description="ציטוט קצר מהלקוח שמראה את הרגש")
+    timestamp: Optional[str] = Field(description="הזמן בשיחה בפורמט MM:SS אם מופיע בתמלול (למשל [00:31]), אחרת null")
+
+
+class ComplianceCheck(BaseModel):
+    """בקרת ציות: בדיקה אחת מרשימת הבדיקות של העסק."""
+    check: str = Field(description="שם הבדיקה, בדיוק כפי שמופיע ברשימת בדיקות הציות")
+    status: Literal["pass", "warning", "fail"] = Field(
+        description="pass = בוצע כנדרש; warning = חלקי / לא ודאי / דורש אימות; fail = לא בוצע / חסר"
+    )
+    evidence: str = Field(description="ציטוט מדויק מהשיחה שמוכיח את הקביעה, או 'לא נאמר בשיחה' אם חסר")
+    note: str = Field(description="משפט קצר: מה תקין / מה חסר / מה צריך לאמת")
+
+
+class FieldUpdate(BaseModel):
+    """עדכון שדה בתיק הלקוח שעולה מהשיחה (עובדה שנמסרה, לא כוונה)."""
+    field: Literal["phone", "email", "city", "amount", "policy", "other"] = Field(
+        description="phone/email/city = פרטי קשר; amount = סכום (החזר, תשלום, חוב); policy = שינוי פוליסה/מסלול/כיסוי; other = אחר"
+    )
+    label: str = Field(description="שם השדה בעברית, למשל 'טלפון', 'סכום החזר פיזיותרפיה', 'מסלול ביטוח'")
+    new_value: str = Field(description="הערך החדש כפי שנמסר. אם לא ודאי - לכתוב את האפשרויות, למשל '400 או 450 ₪'")
+    certain: bool = Field(description="true רק אם הערך נאמר בבירור ובאופן חד-משמעי")
+    evidence: str = Field(description="ציטוט מדויק מהשיחה")
+
+
+class CustomerIntent(BaseModel):
+    """כוונה שהלקוח הביע (לא עובדה): שוקל לעזוב, שוקל לבטל, שוקל להתלונן."""
+    intent: Literal["churn", "cancel", "complaint", "other"]
+    description: str = Field(description="מה הלקוח שוקל, במשפט קצר")
+    evidence: str = Field(description="ציטוט מדויק מהשיחה")
 
 
 class SpeakerRole(BaseModel):
@@ -117,5 +146,15 @@ class CallAnalysis(BaseModel):
     customer_end_emotion: Emotion = Field(description="איך הלקוח הרגיש בסוף השיחה")
     churn_risk: int = Field(description="סיכון נטישה 0-100: עד כמה סביר שהלקוח יעזוב בעקבות השיחה")
     churn_reason: str = Field(description="משפט אחד: למה זה הסיכון")
+    compliance_checks: list[ComplianceCheck] = Field(description="תוצאה לכל אחת מבדיקות הציות שברשימה, באותו סדר")
+    field_updates: list[FieldUpdate] = Field(
+        description="עדכונים לתיק הלקוח שנמסרו כעובדה בשיחה (טלפון חדש, סכום, שינוי פוליסה). לא לכלול כוונות"
+    )
+    customer_intents: list[CustomerIntent] = Field(
+        description="כוונות שהלקוח הביע ('אני שוקל לעבור', 'אולי אבטל'). כוונה אינה עובדה ולא משנה את התיק"
+    )
+    rep_recommendation: str = Field(
+        description="המלצה לנציג: 1-2 משפטים מעשיים מה כדאי לעשות עכשיו מול הלקוח, לפי הרגש שלו בסיום והבעיות שנשארו פתוחות"
+    )
     sentiment: Literal["positive", "neutral", "negative"]
     status: Literal["resolved", "pending_customer", "pending_business", "needs_follow_up"]

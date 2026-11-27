@@ -19,7 +19,9 @@ from urllib.parse import urlencode
 from email.message import EmailMessage
 from pathlib import Path
 
+import classify
 import db
+import email_design
 import gmail
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -123,62 +125,148 @@ def business_name() -> str:
     return os.getenv("BUSINESS_NAME", "העסק")
 
 
-def customer_report(call: dict, recipient_name: str | None = None) -> str:
-    a, c = call["analysis"], call["customer"]
-    greeting = recipient_name or c.get("name")
-    my_tasks = [t for t in a["action_items"] if t["owner"] == "customer"]
-    risks = "".join(f'<div class="risk">⚠️ {_e(r["description"])}</div>' for r in a["risk_flags"])
-    glossary = "".join(f"<dt>{_e(g['term'])}</dt><dd>{_e(g['explanation'])}</dd>" for g in a["glossary"])
-    payments = "".join(f"<li>{_e(p['description'])}: {_e(p['amount'])} {_e(p['currency'])}{' (חודשי)' if p['recurring'] else ''}</li>"
-                       for p in a["payments"])
-    questions = "".join(f"<li>{_e(q)}</li>" for q in a["follow_up_questions"])
-    body = f"""
-      <h1>{_e(greeting) + ", " if greeting else ""}סיכום השיחה שלך עם {_e(business_name())}</h1>
-      <div class="muted">{_e(call['created_at'])} · {_e(a['title'])}</div>
-      {_policy_block(a, for_customer=True)}{risks}
-      {next_meeting_block(a)}
-      <h2>📩 מה סוכם</h2><div class="msg">{_e(a['customer_message'])}</div>
-      <h2>✅ מה עליך לעשות</h2>{_items(my_tasks, "אין משימות - הכל טופל 🎉", with_calendar=True)}
-      <h2>🤝 מה {_e(business_name())} התחייב לעשות</h2>{_items(a['business_commitments'])}
-      {f'<h2>💳 תשלומים</h2><ul>{payments}</ul>' if payments else ''}
-      {f'<h2>📖 מה פירוש המונחים</h2><dl>{glossary}</dl>' if glossary else ''}
-      {f'<h2>❓ שאלות לשיחה הבאה</h2><ul>{questions}</ul>' if questions else ''}
-      <p class="muted">הסיכום נוצר אוטומטית ע"י WrapUpAI. פרטים אישיים (ת"ז, סיסמאות, כרטיס אשראי) סוננו ולא נשמרו.</p>"""
-    return _page("סיכום השיחה שלך", body)
+def customer_report(call: dict, recipient_name: str | None = None, inline_images: bool = False) -> str:
+    """המייל/PDF הוויזואלי ללקוח (עיצוב Figma). inline_images=True → תמונות cid: למייל, אחרת data: ל-PDF."""
+    assets = email_design.ensure_assets(_chrome())
+    if inline_images:
+        img = lambda n: f"cid:{n}" if n in assets else ""  # noqa: E731
+    else:
+        img = lambda n: email_design.data_uri(assets[n]) if n in assets else ""  # noqa: E731
+    return email_design.customer_email_html(call, recipient_name, img, business_name(), calendar_link, EMOTION)
 
 
-def business_report(call: dict) -> str:
+def business_report(call: dict, inline_images: bool = False) -> str:
+    """המייל/PDF לנציג ולעסק: אותו מלל ואותו סדר כמו קודם, בעיצוב של המייל ללקוח,
+    ובתוספת רמזור הציות ועדכוני השדות בתיק הלקוח."""
     a, c = call["analysis"], call["customer"]
-    risks = "".join(f'<div class="risk">⚠️ [{_e(r["severity"])}] {_e(r["description"])}</div>' for r in a["risk_flags"])
-    business_tasks = a["business_commitments"] + [t for t in a["action_items"] if t["owner"] == "business"]
-    customer_tasks = [t for t in a["action_items"] if t["owner"] == "customer"]
+    chrome = _chrome()
+    assets = email_design.ensure_assets(chrome)
+    score, delta = classify.experience_score(a)
+    gpath = email_design.gauge_png(score, chrome)
+    if gpath:
+        assets[gpath.stem] = gpath
+    img = (lambda n: f"cid:{n}" if n in assets else "") if inline_images else \
+          (lambda n: email_design.data_uri(assets[n]) if n in assets else "")  # noqa: E731
+    mood_of = {"angry": "Angry", "frustrated": "Angry", "stressed": "Sad", "confused": "Neutral",
+               "calm": "Smile", "understanding": "Smile", "satisfied": "Happy"}
+    card = 'background:#FFFFFF;border-radius:18px;padding:22px;margin:0 0 16px;'
+    h3 = 'margin:0 0 10px;font-size:17px;font-weight:800;color:#2E3440;'
+    p = 'margin:0;font-size:15px;line-height:1.6;color:#3B4252;'
+    pbx = os.getenv("PBX_URL", "http://localhost:3000")
+
+    def items(lst, empty="אין"):
+        if not lst:
+            return f'<p style="{p};color:#9A938C">{empty}</p>'
+        return "".join(
+            f'<div style="background:#F7F4F0;border-radius:12px;padding:10px 14px;margin:0 0 8px;font-size:15px;font-weight:600;color:#2E3440">'
+            f'{_e(i["description"])}' + (f' <span style="background:#FFF1C9;color:#8A6100;font-size:12px;font-weight:700;border-radius:99px;padding:2px 10px">עד {_e(i["due_date"])}</span>' if i.get("due_date") else "")
+            + '</div>' for i in lst)
+
+    # Policy Guard + סיכונים (כמו קודם)
+    policy = ""
+    if a.get("policy_conflicts"):
+        rows = "".join(f'<div style="background:#FFFFFF;border-radius:10px;padding:10px 12px;margin-top:8px;font-size:14px;color:#2E3440">'
+                       f'🗣️ נאמר בשיחה: <q>{_e(x["rep_statement"])}</q><br>📜 בתקנון: <q>{_e(x["policy_text"])}</q><br>'
+                       f'<span style="color:#7A808C">{_e(x["explanation"])}</span></div>' for x in a["policy_conflicts"])
+        policy = (f'<div style="{card}background:#FDECEC;border:2px solid #E5534B">'
+                  f'<p style="{h3}color:#7A1610">🛡️ Policy Guard: {len(a["policy_conflicts"])} הבטחות של הנציג סותרות את התקנון</p>{rows}</div>')
+    risks = "".join(f'<div style="{card}background:#FDECEC;color:#B3261E;font-weight:700;padding:12px 16px">⚠️ [{_e(r["severity"])}] {_e(r["description"])}</div>'
+                    for r in a["risk_flags"])
+
+    # בקרת ציות רגולטורית (רמזור)
+    comp = classify.compliance(a)
+    compliance_html = ""
+    if comp["checks"]:
+        L = {"green": ("#2F9E6A", "#E7F6EE", "תקין"), "yellow": ("#C77A12", "#FFF4D6", "דורש אימות"), "red": ("#E5534B", "#FDECEC", "חסר רכיב חובה")}
+        col, bg, title = L[comp["overall"]]
+        lights = "".join(f'<div style="width:22px;height:22px;border-radius:99px;margin:4px auto;background:{L[k][0] if k == comp["overall"] else "#4A4D55"}"></div>'
+                         for k in ("red", "yellow", "green"))
+        dot = {"pass": ("#2F9E6A", "תקין"), "warning": ("#E0A43A", "לאימות"), "fail": ("#E5534B", "חסר")}
+        checks = "".join(
+            f'<div style="background:#FFFFFF;border-radius:10px;padding:10px 12px;margin-top:8px;font-size:14px">'
+            f'<span style="display:inline-block;width:10px;height:10px;border-radius:99px;background:{dot[x["status"]][0]}"></span> '
+            f'<b>{_e(x["check"])}</b> · <b style="color:{dot[x["status"]][0]}">{dot[x["status"]][1]}</b><br>'
+            (f'<span style="color:#5F6672">{_e(x["note"])}</span><br>' if x["note"].strip() else '') + f'<i style="color:#9A938C">"{_e(x["evidence"])}"</i></div>' for x in comp["checks"])
+        compliance_html = (f'<div style="{card}background:{bg};border:2px solid {col}">'
+                           f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+                           f'<td width="40" valign="top"><div style="background:#26282E;border-radius:12px;padding:4px 6px">{lights}</div></td>'
+                           f'<td style="padding-right:14px" valign="middle"><div style="font-size:12px;font-weight:700;color:#7A808C">🚦 בקרת ציות רגולטורית</div>'
+                           f'<div style="font-size:20px;font-weight:800;color:{col}">{title}</div></td></tr></table>{checks}</div>')
+
+    # עדכוני שדות בתיק הלקוח
+    ups = classify.field_updates(a)
+    updates_html = ""
+    if ups or a.get("customer_intents"):
+        rows = "".join(
+            f'<div style="background:{"#E7F6EE" if u["risk"] == "low" else "#FFF8E6"};border-radius:10px;padding:10px 12px;margin-top:8px;font-size:14px">'
+            f'<b>{_e(u["label"])}:</b> {_e(u["newValue"])} '
+            + ('<b style="color:#2F7D52">✓ סיכון נמוך · נשמר אוטומטית בתיק</b>' if u["risk"] == "low"
+               else f'<b style="color:#8A6100">🔒 נעול לאישור הנציג{"" if u["certain"] else " · לא ודאי"}</b>')
+            + f'<br><i style="color:#9A938C">"{_e(u["evidence"])}"</i></div>' for u in ups)
+        intents = "".join(f'<div style="background:#EEF0FF;border-radius:10px;padding:10px 12px;margin-top:8px;font-size:14px;color:#3D2FD1">'
+                          f'<b>כוונה, לא עובדה:</b> הלקוח {_e(classify.INTENT_LABEL[i["intent"]])}: {_e(i["description"])} → נפתחה משימת שימור, '
+                          f'לא שונה דבר בתיק<br><i style="color:#7A80B0">"{_e(i["evidence"])}"</i></div>' for i in a.get("customer_intents") or [])
+        pending = sum(1 for u in ups if u["risk"] == "high")
+        cta = (f'<div style="text-align:center;margin-top:14px"><a href="{_e(pbx)}" style="display:inline-block;background:#5B4CF0;color:#FFFFFF;'
+               f'text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:12px">לאישור {pending} עדכונים במרכזייה</a></div>') if pending else ""
+        updates_html = f'<div style="{card}"><p style="{h3}">🗂️ עדכוני שדות בתיק הלקוח</p>{rows}{intents}{cta}</div>'
+
+    # תחושות הלקוח (כמו קודם, עם פרצופים)
     emotion = ""
     if a.get("emotion_map"):
         churn = a["churn_risk"]
         color = "#d93025" if churn >= 60 else "#e8a100" if churn >= 30 else "#0f9d58"
         cells = "".join(
-            f"<td class='emo'><div class='muted'>{STAGE[e['stage']]}</div><b>{EMOTION.get(e['emotion'], e['emotion'])}</b>"
-            f"<div class='muted'>\"{_e(e['evidence'])}\"</div></td>" for e in a["emotion_map"])
-        emotion = ("<h2>🎭 תחושות הלקוח במהלך השיחה</h2>"
-                   f"<table class='emos'><tr>{cells}</tr></table>"
-                   f"<p>הלקוח סיים את השיחה: <b>{EMOTION.get(a.get('customer_end_emotion'), '')}</b></p>"
-                   f"<div class='meter'><div style='width:{churn}%;background:{color}'></div></div>"
-                   f"<p>סיכון נטישה: <b style='color:{color}'>{churn}%</b> · {_e(a['churn_reason'])}"
-                   + ("<br><b style='color:#d93025'>🚨 נפתחה משימת שימור לראש הצוות</b>" if churn >= db.CHURN_THRESHOLD else "")
-                   + "</p>")
-    body = f"""
-      <h1>סיכום פגישה ותחושות לקוח: {_e(c.get('name'))}</h1>
-      <div class="muted">תיק #{c['id']} · טלפון {_e(c.get('phone') or '-')} · מספר לקוח {_e(c.get('customer_number') or '-')}<br>
-      {_e(call['created_at'])} · סוג: {CATEGORIES.get(a['category'], '')} · סטטוס: {STATUS.get(a['status'], '')} · קובץ: {_e(call.get('filename') or '-')}</div>
-      {_policy_block(a, for_customer=False)}{risks}
-      <h2>📝 סיכום לתיק</h2><p>{_e(a['summary'])}</p>
-      {next_meeting_block(a)}
-      {emotion}
-      <h2>🗂️ לטיפול העסק (בירוקרטיה והתחייבויות)</h2>{_items(business_tasks)}
-      <h2>⏳ ממתין ללקוח</h2>{_items(customer_tasks)}
-      <h2>📩 ההודעה שנשלחה ללקוח</h2><div class="msg">{_e(a['customer_message'])}</div>
-      {'<p class="muted">🔒 סוננו מהתמלול: ' + _e(', '.join(call['redactions'])) + '</p>' if call['redactions'] else ''}"""
-    return _page(f"דוח שיחה - {c.get('name')}", body)
+            f'<td align="center" valign="top" style="background:#F7F4F0;border-radius:12px;padding:10px 6px;width:33%">'
+            f'<div style="font-size:12px;color:#9A938C">{STAGE[e["stage"]]}</div>'
+            f'<img src="{img("face_" + mood_of.get(e["emotion"], "Neutral"))}" width="44" height="44" alt="" style="display:block;margin:6px auto">'
+            f'<div style="font-size:15px;font-weight:800;color:#26282E">{EMOTION.get(e["emotion"], e["emotion"])}</div>'
+            f'<div style="font-size:12px;color:#7A808C">"{_e(e["evidence"])}"</div></td>' for e in a["emotion_map"])
+        emotion = (f'<div style="{card}"><p style="{h3}">🎭 תחושות הלקוח במהלך השיחה</p>'
+                   f'<table role="presentation" width="100%" cellpadding="0" cellspacing="6"><tr>{cells}</tr></table>'
+                   f'<p style="{p};margin-top:10px">הלקוח סיים את השיחה: <b>{EMOTION.get(a.get("customer_end_emotion"), "")}</b></p>'
+                   f'<div style="height:8px;background:#EDEFF4;border-radius:99px;margin:8px 0 4px"><div style="height:8px;width:{churn}%;background:{color};border-radius:99px"></div></div>'
+                   f'<p style="{p}">סיכון נטישה: <b style="color:{color}">{churn}%</b> · {_e(a["churn_reason"])}'
+                   + ('<br><b style="color:#d93025">🚨 נפתחה משימת שימור לראש הצוות</b>' if churn >= db.CHURN_THRESHOLD else "") + '</p></div>')
+
+    business_tasks = a["business_commitments"] + [t for t in a["action_items"] if t["owner"] == "business"]
+    customer_tasks = [t for t in a["action_items"] if t["owner"] == "customer"]
+    meet = next_meeting_block(a).replace('class="meet"', f'style="{card}background:#EEF0FF;border:2px solid #5B4CF0"').replace(
+        'class="cal big"', 'style="display:inline-block;background:#5B4CF0;color:#FFFFFF;text-decoration:none;font-weight:700;padding:10px 18px;border-radius:12px;margin-top:8px"').replace(
+        'class="muted"', 'style="font-size:14px;color:#5F6672"')
+    day = (call.get("created_at") or "")[:10]
+    gauge = (f'<img src="{img(gpath.stem)}" width="300" alt="" style="display:block;margin:0 auto;border:0;max-width:100%;height:auto">'
+             f'<div style="font-size:44px;font-weight:800;color:#26282E;line-height:1">{score}<span style="font-size:15px;color:#9AA0AA"> מתוך 100</span></div>'
+             f'<div style="font-size:13px;font-weight:700;color:{"#2F9E6A" if delta >= 0 else "#E5534B"}">'
+             f'{("↑" if delta >= 0 else "↓")} {abs(delta)} מהפתיחה · מדד חוויית לקוח</div>') if gpath else ""
+    return f"""<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>סיכום פגישה ותחושות לקוח - {_e(c.get('name'))}</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700;800&display=swap" rel="stylesheet"></head>
+<body style="margin:0;padding:0;background:#F3EEE8;font-family:Heebo,Arial,Helvetica,sans-serif;direction:rtl">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F3EEE8"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#FAF6F2;border-radius:24px">
+<tr><td style="padding:28px 28px 32px;text-align:right">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+    <td style="font-size:15px;font-weight:800;color:#0F2942">{_e(business_name())} · <span style="color:#5B4CF0">WRAPUP AI</span></td>
+    <td align="left" style="font-size:12px;color:#9A938C">{_e(day)}</td></tr></table>
+  <div style="text-align:center;padding:14px 0 6px">
+    {gauge}
+    <h1 style="margin:14px 0 6px;font-size:26px;font-weight:800;color:#EE7A86">סיכום פגישה ותחושות לקוח: {_e(c.get('name'))}</h1>
+    <p style="margin:0;font-size:13px;color:#7B7470">תיק #{c['id']} · טלפון {_e(c.get('phone') or '-')} · מספר לקוח {_e(c.get('customer_number') or '-')}<br>
+    {_e(call['created_at'])} · סוג: {CATEGORIES.get(a['category'], '')} · סטטוס: {STATUS.get(a['status'], '')} · קובץ: {_e(call.get('filename') or '-')}</p>
+  </div>
+  <div style="height:16px"></div>
+  {compliance_html}{policy}{risks}
+  <div style="{card}"><p style="{h3}">📝 סיכום לתיק</p><p style="{p}">{_e(a['summary'])}</p></div>
+  {meet}
+  {emotion}
+  {updates_html}
+  <div style="{card}"><p style="{h3}">🗂️ לטיפול העסק (בירוקרטיה והתחייבויות)</p>{items(business_tasks)}</div>
+  <div style="{card}"><p style="{h3}">⏳ ממתין ללקוח</p>{items(customer_tasks)}</div>
+  <div style="{card}"><p style="{h3}">📩 ההודעה שנשלחה ללקוח</p><p style="{p};background:#E7F6EE;border-radius:12px;padding:12px;white-space:pre-line">{_e(a['customer_message'])}</p></div>
+  {'<p style="text-align:center;font-size:12px;color:#9A938C">🔒 סוננו מהתמלול: ' + _e(', '.join(call['redactions'])) + '</p>' if call['redactions'] else ''}
+  <p style="text-align:center;margin:8px 0 0;font-size:12px;font-weight:600;color:#9A938C">הדוח נוצר אוטומטית ע״י WrapUpAI</p>
+</td></tr></table></td></tr></table></body></html>"""
 
 
 CHROME_PATHS = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -226,21 +314,34 @@ def recipients(call: dict) -> list[tuple[str, str]]:
     return out
 
 
-def _send(to: str, subject: str, html_body: str, attachment: Path | None) -> None:
-    """Gmail API אם מחובר, אחרת SMTP אם מוגדר."""
-    if gmail.is_configured():
-        gmail.send(to, subject, html_body, [attachment] if attachment else [])
-        return
+def _build_message(to: str, subject: str, html_body: str, attachment: Path | None, inline: bool) -> EmailMessage:
     msg = EmailMessage()
-    msg["Subject"], msg["From"], msg["To"] = subject, os.environ["SMTP_USER"], to
+    msg["To"], msg["Subject"] = to, subject
+    if os.getenv("SMTP_USER") and not gmail.is_configured():
+        msg["From"] = os.environ["SMTP_USER"]
     msg.set_content("הסיכום מצורף כקובץ PDF.")
     msg.add_alternative(html_body, subtype="html")
+    if inline:
+        html_part = msg.get_payload()[-1]
+        for name in sorted(set(re.findall(r"cid:([\w-]+)", html_body))):
+            path = email_design.ASSETS / f"{name}.png"
+            if path.exists():
+                html_part.add_related(path.read_bytes(), maintype="image", subtype="png", cid=f"<{name}>", filename=f"{name}.png")
     if attachment and attachment.exists():
         msg.add_attachment(attachment.read_bytes(), maintype="application", subtype="pdf", filename=attachment.name)
-    with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.getenv("SMTP_PORT", "587")), timeout=30) as s:
-        s.starttls()
-        s.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
-        s.send_message(msg)
+    return msg
+
+
+def _send(to: str, subject: str, html_body: str, attachment: Path | None, inline: bool = False) -> None:
+    """Gmail API אם מחובר, אחרת SMTP אם מוגדר."""
+    msg = _build_message(to, subject, html_body, attachment, inline)
+    if gmail.is_configured():
+        gmail.send_message(msg)
+        return
+    with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.getenv("SMTP_PORT", "587")), timeout=30) as smtp:
+        smtp.starttls()
+        smtp.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
+        smtp.send_message(msg)
 
 
 def email_mode() -> str:
@@ -265,7 +366,7 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
         pdfs[kind] = pdf_path if make_pdf(html_path, pdf_path) else None
     notes = ["PDF נוצר" if pdfs["customer"] else "PDF לא נוצר (אין Chrome)"]
 
-    mode = email_mode()
+    mode = "none" if os.getenv("DISABLE_EMAIL") == "1" else email_mode()
     people = recipients_override if recipients_override is not None else recipients(call)
     if mode == "none":
         notes.append(f"מייל לא מוגדר ({len(people)} נמענים ממתינים)")
@@ -283,14 +384,15 @@ def send_reports(call_id: int, recipients_override: list[tuple[str, str]] | None
             f" [דמו - במקור ל: {email or 'ללקוח אין מייל בתיק'}]" if test_to else "")
         try:
             for to in test_to or [email]:
-                _send(to, subject, customer_report(call, name), pdfs["customer"])
+                _send(to, subject, customer_report(call, name, inline_images=True), pdfs["customer"], inline=True)
             sent_to.append(email or f"{name or 'לקוח'} (דמו - אין מייל בתיק)")
         except Exception as e:  # noqa: BLE001
             failed.append(f"{email}: {e}")
     biz_sent = []
     for to in business_to:
         try:
-            _send(to, f"סיכום פגישה ותחושות לקוח: {call['customer'].get('name')}", biz_html, pdfs["business"])
+            _send(to, f"סיכום פגישה ותחושות לקוח: {call['customer'].get('name')}", business_report(call, inline_images=True),
+                  pdfs["business"], inline=True)
             biz_sent.append(to)
         except Exception as e:  # noqa: BLE001
             failed.append(f"עסק {to}: {e}")

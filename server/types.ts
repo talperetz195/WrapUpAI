@@ -36,6 +36,8 @@ export interface CustomerRecord {
   caseStatus: string;
   /** כתובות מייל לשליחת סיכום השיחה (WrapUpAI). בני זוג = כמה כתובות */
   emails?: string[];
+  /** WrapUpAI: שדות שאושרו ונשמרו מתוך שיחות (סכומים, שינויי פוליסה וכו') */
+  crmFields?: Record<string, string>;
 }
 
 export interface PbxRecording {
@@ -92,9 +94,49 @@ export interface TranscriptLine {
   text: string;
 }
 
+/** WrapUpAI: נתוני רגש מובנים מהשיחה (למסכי דף הבית ותחושות הלקוח) */
+export type WrapUpEmotion = 'angry' | 'frustrated' | 'stressed' | 'confused' | 'calm' | 'understanding' | 'satisfied';
+
+export interface WrapUpSentiment {
+  score: number;
+  deltaFromOpening: number;
+  endEmotion: WrapUpEmotion;
+  journey: Array<{ stage: 'opening' | 'middle' | 'closing'; emotion: WrapUpEmotion; evidence: string; timestamp?: string | null }>;
+  churnRisk: number;
+  churnReason: string;
+  policyConflicts: Array<{ repStatement: string; policyText: string; explanation: string; severity: string }>;
+  recommendation: string;
+  openTasks: number;
+  title: string;
+}
+
+/** WrapUpAI: בקרת ציות רגולטורית (רמזור) */
+export interface WrapUpCompliance {
+  overall: 'green' | 'yellow' | 'red';
+  checks: Array<{ check: string; status: 'pass' | 'warning' | 'fail'; evidence: string; note: string }>;
+}
+
+/** WrapUpAI: עדכון שדה בתיק הלקוח. סיכון נמוך = אוטומטי; סיכון גבוה / לא ודאי = נעול לאישור הנציג */
+export interface WrapUpFieldUpdate {
+  id: string;
+  field: 'phone' | 'email' | 'city' | 'amount' | 'policy' | 'other';
+  label: string;
+  newValue: string;
+  certain: boolean;
+  evidence: string;
+  risk: 'low' | 'high';
+  status: 'auto_approved' | 'pending' | 'approved' | 'rejected' | 'saved';
+  previousValue?: string;
+  decidedBy?: string;
+}
+
 export interface WrapUpDelivery {
   delivery: string;
   sentTo: string[];
+  sentiment?: WrapUpSentiment;
+  compliance?: WrapUpCompliance;
+  fieldUpdates?: WrapUpFieldUpdate[];
+  intents?: Array<{ intent: string; label: string; description: string; evidence: string }>;
   pdfFileName?: string | null;
   customerPdfFileName?: string | null;
 }

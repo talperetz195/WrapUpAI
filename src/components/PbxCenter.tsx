@@ -25,12 +25,15 @@ import {
 } from 'lucide-react';
 import { createRecording, fetchRecordingAudioBlob, updateRecordingDuration } from '../api';
 import { INSTITUTIONAL_DEPARTMENTS } from '../constants';
-import type { CallStatus, CustomerRecord, PbxRecording, SystemSnapshot } from '../types';
+import type { CallAnalysisReport, CallStatus, CustomerRecord, PbxRecording, SystemSnapshot } from '../types';
+import { EMOTION_LABEL, EMOTION_MOOD, Face, churnColors } from './wrapup/sentimentUi';
 
 interface PbxCenterProps {
   token: string;
   recordings: PbxRecording[];
   customers: CustomerRecord[];
+  /** WrapUpAI: הדוחות, כדי להציג רגש וסיכון נטישה בכל שורה */
+  reports: CallAnalysisReport[];
   selectedRecordingId: string | null;
   onSelectRecording: (recordingId: string) => void;
   onTransferToExternal: (recordingId: string) => Promise<void>;
@@ -119,6 +122,7 @@ export const PbxCenter: React.FC<PbxCenterProps> = ({
   token,
   recordings,
   customers,
+  reports,
   selectedRecordingId,
   onSelectRecording,
   onTransferToExternal,
@@ -454,439 +458,475 @@ export const PbxCenter: React.FC<PbxCenterProps> = ({
   const waveformBars = [26, 44, 68, 52, 82, 38, 60, 90, 48, 72, 35, 64, 84, 42, 56, 76, 32, 66, 80, 46, 58, 70, 40, 62];
   const progressRatio = duration > 0 ? Math.min(1, currentTime / duration) : 0;
 
+  // ---- WrapUpAI · עיצוב אפשרות A (טבלת כרטיסים) ----
+  const AVATAR_COLORS: Array<[string, string]> = [
+    ['#FFD6E0', '#8C2F4A'],
+    ['#DCE4FF', '#2B3F8F'],
+    ['#D6F5E3', '#1F6B45'],
+    ['#FFE1CC', '#9A4A12'],
+    ['#FFF1C9', '#8A6100'],
+    ['#E9E4FF', '#4A3BB8'],
+  ];
+  const avatarFor = (key: string): [string, string] => {
+    let h = 0;
+    for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return AVATAR_COLORS[h % AVATAR_COLORS.length];
+  };
+  const initialsOf = (name: string) =>
+    name
+      .replace(/[׳"']/g, '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join('');
+  const STATUS_PILL: Record<CallStatus, [string, string, string, string]> = {
+    pending_transfer: ['ממתין לשליחה', '#F1F2F6', '#6B7280', '#9AA0AA'],
+    transferring: ['בניתוח עכשיו', '#EEF0FF', '#5B4CF0', '#5B4CF0'],
+    analyzing_external: ['בניתוח עכשיו', '#EEF0FF', '#5B4CF0', '#5B4CF0'],
+    report_returned: ['דוח התקבל', '#E3F6EA', '#2F7D52', '#2F9E6A'],
+  };
+  const sentimentOf = (rec: PbxRecording) => reports.find((r) => r.id === rec.reportId)?.wrapup?.sentiment;
+  const todayKey = new Date().toDateString();
+  const stats = {
+    today: recordings.filter((r) => new Date(r.callDate).toDateString() === todayKey).length,
+    returned: recordings.filter((r) => r.status === 'report_returned').length,
+    analyzing: recordings.filter((r) => r.status === 'analyzing_external' || r.status === 'transferring'),
+    pending: recordings.filter((r) => r.status === 'pending_transfer'),
+  };
+  const avgDuration = recordings.length
+    ? Math.round(recordings.reduce((n, r) => n + (r.durationSeconds || 0), 0) / recordings.length)
+    : 0;
+  const ROW_GRID = 'lg:grid lg:grid-cols-[minmax(180px,1fr)_150px_118px_72px_44px_96px_124px_128px] lg:items-center lg:gap-3';
+
+  const Avatar = ({ name, id, size = 44 }: { name: string; id: string; size?: number }) => {
+    const [bg, fg] = avatarFor(id);
+    return (
+      <span
+        className="rounded-full flex items-center justify-center font-extrabold shrink-0"
+        style={{ width: size, height: size, background: bg, color: fg, fontSize: size * 0.34 }}
+      >
+        {initialsOf(name)}
+      </span>
+    );
+  };
+  const Pill = ({ status }: { status: CallStatus }) => {
+    const [label, bg, fg, dot] = STATUS_PILL[status];
+    return (
+      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap" style={{ background: bg, color: fg }}>
+        {status === 'analyzing_external' || status === 'transferring' ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : (
+          <span className="w-2 h-2 rounded-full" style={{ background: dot }} />
+        )}
+        {label}
+      </span>
+    );
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Integrated Playback & One-Click Controlled Transfer Panel */}
+    <div className="bg-[#F4F2FF] rounded-[24px] p-4 sm:p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[260px] text-right">
+          <h2 className="text-[26px] font-extrabold text-[#1E1B4B]">מרכזיית הקלטות שיחה</h2>
+          <p className="text-[13px] font-medium text-[#8A8FA3]">כל השיחות שהוקלטו, מה כבר נותח ומה מחכה לשליחה</p>
+        </div>
+        <label className="relative">
+          <Search className="w-4 h-4 text-[#A3A7BD] absolute right-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="חיפוש לפי שם שיחה, לקוח או מחלקה..."
+            className="w-[300px] max-w-full pr-10 pl-3 py-3 text-sm bg-white rounded-xl border border-transparent focus:outline-none focus:ring-2 focus:ring-[#5B4CF0]"
+          />
+        </label>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold bg-[#5B4CF0] hover:bg-[#4A3BDF] text-white rounded-xl transition-colors whitespace-nowrap"
+        >
+          <Plus className="w-4 h-4" />
+          קליטת הקלטה חדשה
+        </button>
+      </div>
+
+      {/* Stat cards (click = filter) */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        {(
+          [
+            { label: 'הקלטות היום', value: stats.today, sub: `משך ממוצע ${formatDuration(avgDuration)}`, bg: '#FFF1DE', fg: '#D9822B', Icon: Mic, filter: 'all' },
+            { label: 'דוחות שהתקבלו', value: stats.returned, sub: 'עם סיכום ו-PDF בתיק', bg: '#E3F6EA', fg: '#2F9E6A', Icon: CheckCircle2, filter: 'returned' },
+            { label: 'בניתוח עכשיו', value: stats.analyzing.length, sub: stats.analyzing[0]?.customerName || 'אין כרגע', bg: '#EEF0FF', fg: '#5B4CF0', Icon: Loader2, filter: 'processing' },
+            { label: 'ממתינות לשליחה', value: stats.pending.length, sub: stats.pending[0]?.customerName || 'הכל נשלח', bg: '#F1F2F6', fg: '#6B7280', Icon: Clock, filter: 'pending' },
+          ] as const
+        ).map(({ label, value, sub, bg, fg, Icon, filter }) => (
+          <button
+            key={label}
+            onClick={() => setStatusFilter(filter)}
+            className={`bg-white rounded-[18px] px-[18px] py-4 flex items-center gap-3.5 text-right transition-shadow hover:shadow-md ${
+              statusFilter === filter && filter !== 'all' ? 'ring-2 ring-[#8B7CF6]' : ''
+            }`}
+          >
+            <span className="w-12 h-12 rounded-[14px] flex items-center justify-center shrink-0" style={{ background: bg }}>
+              <Icon className="w-6 h-6" style={{ color: fg }} />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-xs font-bold text-[#8A8FA3]">{label}</span>
+              <span className="block text-[30px] leading-tight font-extrabold text-[#1E1B4B]">{value}</span>
+              <span className="block text-xs font-medium text-[#A3A7BD] truncate">{sub}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Now playing */}
       {selectedRecording && (
-        <section className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            <div className="space-y-1 min-w-0">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <Headphones className="w-4 h-4 text-blue-700 shrink-0" />
-                <h2 className="text-base font-bold text-slate-900 font-mono truncate">
-                  {selectedRecording.uniqueCallName}
-                </h2>
-                <span className="text-slate-300" aria-hidden="true">·</span>
-                {renderStatusLabel(selectedRecording.status)}
-              </div>
-              <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
+        <section className="bg-white rounded-[22px] p-5 sm:p-[22px] space-y-4 shadow-[0_6px_20px_rgba(91,76,240,0.08)]">
+          <div className="flex flex-wrap items-center gap-3">
+            <Avatar name={selectedRecording.customerName} id={selectedRecording.customerId} size={56} />
+            <div className="flex-1 min-w-[240px] text-right space-y-0.5">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => onOpenCustomerReport(selectedRecording.customerId, selectedRecording.reportId)}
-                  className="font-semibold text-blue-700 hover:underline inline-flex items-center gap-1"
+                  className="text-xl font-extrabold text-[#1E1B4B] hover:text-[#5B4CF0]"
                 >
-                  <User className="w-3.5 h-3.5" />
-                  <span>{selectedRecording.customerName}</span>
+                  {selectedRecording.customerName}
                 </button>
-                <span aria-hidden="true">·</span>
-                <span>{selectedRecording.department}</span>
-                <span aria-hidden="true">·</span>
-                <span className="tabular-nums">{formatCallDate(selectedRecording.callDate)}</span>
-                <span aria-hidden="true">·</span>
-                <span className="inline-flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{selectedRecording.participants.length} משתתפים</span>
+                <Pill status={selectedRecording.status} />
+              </div>
+              <div className="text-[13px] font-medium text-[#8A8FA3]">
+                {selectedRecording.department} · {formatCallDate(selectedRecording.callDate)} ·{' '}
+                <span dir="ltr" className="font-mono">
+                  {selectedRecording.uniqueCallName}
                 </span>
               </div>
             </div>
-
-            <div className="flex items-center gap-3 shrink-0 flex-wrap">
-              {selectedRecording.status === 'report_returned' && selectedRecording.reportId ? (
-                <>
-                  <button
-                    onClick={() => onOpenPdf(selectedRecording.reportId!)}
-                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-[#0F2942] hover:bg-slate-800 text-white rounded-lg transition-colors whitespace-nowrap shrink-0"
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>פתח מסמך PDF</span>
-                  </button>
-                  <button
-                    onClick={() => onOpenCustomerReport(selectedRecording.customerId, selectedRecording.reportId)}
-                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition-colors whitespace-nowrap shrink-0"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>כרטיס לקוח</span>
-                  </button>
-                </>
-              ) : null}
-
+            <div className="flex flex-wrap gap-2.5">
               <button
                 onClick={() => onTransferToExternal(selectedRecording.id)}
-                disabled={
-                  transferringId === selectedRecording.id ||
-                  selectedRecording.status === 'analyzing_external'
-                }
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-700 hover:bg-blue-800 disabled:bg-slate-300 disabled:text-slate-600 text-white rounded-lg transition-colors whitespace-nowrap shrink-0"
+                disabled={transferringId === selectedRecording.id || selectedRecording.status === 'analyzing_external'}
+                className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold bg-[#5B4CF0] hover:bg-[#4A3BDF] disabled:bg-[#A79CF8] text-white rounded-xl"
               >
                 {transferringId === selectedRecording.id || selectedRecording.status === 'analyzing_external' ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>מעביר למערכת החיצונית...</span>
+                    <Loader2 className="w-4 h-4 animate-spin" /> מתמלל ומנתח...
                   </>
                 ) : (
                   <>
                     <Send className="w-4 h-4" />
-                    <span>
-                      {selectedRecording.status === 'report_returned'
-                        ? 'תמלל ונתח מחדש חיצונית'
-                        : 'העבר למערכת תמלול וניתוח בלחיצה אחת'}
-                    </span>
+                    {selectedRecording.status === 'report_returned' ? 'תמלל ונתח מחדש עם WrapUpAI' : 'תמלל ונתח עם WrapUpAI'}
                   </>
                 )}
               </button>
+              {selectedRecording.status === 'report_returned' && selectedRecording.reportId && (
+                <>
+                  <button
+                    onClick={() => onOpenPdf(selectedRecording.reportId!)}
+                    className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold bg-white border-[1.5px] border-[#5B4CF0] text-[#5B4CF0] hover:bg-[#F5F4FF] rounded-xl"
+                  >
+                    <FileText className="w-4 h-4" /> פתח PDF
+                  </button>
+                  <button
+                    onClick={() => onOpenCustomerReport(selectedRecording.customerId, selectedRecording.reportId)}
+                    className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold bg-white border-[1.5px] border-[#5B4CF0] text-[#5B4CF0] hover:bg-[#F5F4FF] rounded-xl"
+                  >
+                    <User className="w-4 h-4" /> כרטיס לקוח
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Audio Player Bar */}
-          <div className="pt-4 space-y-3">
-            {audioUrl && (
-              <audio
-                ref={audioRef}
-                src={audioUrl}
-                onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
-                onLoadedMetadata={() => {
-                  const mediaDur = audioRef.current?.duration;
-                  if (mediaDur && Number.isFinite(mediaDur) && mediaDur > 0) {
-                    setDuration(mediaDur);
-                    const rounded = Math.max(1, Math.round(mediaDur));
-                    if (Math.abs(rounded - selectedRecording.durationSeconds) >= 1) {
-                      void updateRecordingDuration(token, selectedRecording.id, rounded)
-                        .then(onSnapshotUpdate)
-                        .catch(() => {});
-                    }
-                  } else {
-                    setDuration(selectedRecording.durationSeconds);
+          {audioUrl && (
+            <audio
+              ref={audioRef}
+              src={audioUrl}
+              onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+              onLoadedMetadata={() => {
+                const mediaDur = audioRef.current?.duration;
+                if (mediaDur && Number.isFinite(mediaDur) && mediaDur > 0) {
+                  setDuration(mediaDur);
+                  const rounded = Math.max(1, Math.round(mediaDur));
+                  if (Math.abs(rounded - selectedRecording.durationSeconds) >= 1) {
+                    void updateRecordingDuration(token, selectedRecording.id, rounded)
+                      .then(onSnapshotUpdate)
+                      .catch(() => {});
                   }
-                }}
-                onEnded={() => setIsPlaying(false)}
-              />
-            )}
+                } else {
+                  setDuration(selectedRecording.durationSeconds);
+                }
+              }}
+              onEnded={() => setIsPlaying(false)}
+            />
+          )}
 
-            <div className="flex flex-col md:flex-row md:items-center gap-4 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={handleLoadAndTogglePlay}
-                  disabled={audioLoading}
-                  className="w-10 h-10 rounded-lg bg-[#0F2942] hover:bg-slate-800 disabled:opacity-60 text-white flex items-center justify-center transition-colors"
-                  title={isPlaying ? 'השהה האזנה' : 'הפעל הקלטת שיחה'}
-                >
-                  {audioLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : isPlaying ? (
-                    <Pause className="w-4 h-4" />
-                  ) : (
-                    <Play className="w-4 h-4" />
-                  )}
-                </button>
-
-                <button
-                  onClick={() => handleSeek(currentTime - 10)}
-                  disabled={!audioUrl}
-                  className="p-2 text-slate-600 hover:text-slate-900 disabled:opacity-40 rounded-md hover:bg-slate-200/60 transition-colors"
-                  title="אחורה 10 שניות"
-                >
-                  <RotateCw className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => handleSeek(currentTime + 10)}
-                  disabled={!audioUrl}
-                  className="p-2 text-slate-600 hover:text-slate-900 disabled:opacity-40 rounded-md hover:bg-slate-200/60 transition-colors"
-                  title="קדימה 10 שניות"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Waveform + Scrubber */}
-              <div className="flex-1 min-w-0 space-y-1.5">
-                <div className="flex items-end gap-1 h-7" aria-hidden="true">
-                  {waveformBars.map((heightPct, idx) => {
-                    const barRatio = (idx + 1) / waveformBars.length;
-                    const active = barRatio <= progressRatio;
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleSeek(barRatio * duration)}
-                        disabled={!audioUrl}
-                        className={`flex-1 rounded-sm transition-colors ${
-                          active ? 'bg-blue-700' : 'bg-slate-300 hover:bg-slate-400'
-                        }`}
-                        style={{ height: `${heightPct}%` }}
-                      />
-                    );
-                  })}
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 1}
-                  step={0.1}
-                  value={currentTime}
-                  disabled={!audioUrl}
-                  onChange={(e) => handleSeek(Number(e.target.value))}
-                  className="w-full accent-blue-700 h-1.5 cursor-pointer"
-                  aria-label="ציר זמן הקלטה"
-                />
-              </div>
-
-              <div className="flex items-center gap-3 shrink-0 justify-between md:justify-end">
-                <span className="text-xs font-mono tabular-nums text-slate-700" dir="ltr">
-                  {formatDuration(currentTime)} / {formatDuration(duration)}
-                </span>
-
-                <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-md p-0.5">
-                  {([1, 1.25, 1.5] as const).map((rate) => (
-                    <button
-                      key={rate}
-                      onClick={() => setPlaybackRate(rate)}
-                      className={`px-2 py-1 text-xs font-mono tabular-nums rounded transition-colors ${
-                        playbackRate === rate
-                          ? 'bg-slate-900 text-white'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      {rate}x
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-1.5">
+          {/* Player */}
+          <div className="flex flex-wrap items-center gap-3.5 bg-[#F7F5FF] rounded-2xl px-[18px] py-3.5">
+            <button
+              onClick={handleLoadAndTogglePlay}
+              disabled={audioLoading}
+              className="w-12 h-12 rounded-full bg-[#5B4CF0] hover:bg-[#4A3BDF] disabled:opacity-60 text-white flex items-center justify-center shrink-0"
+              title={isPlaying ? 'השהה האזנה' : 'הפעל הקלטת שיחה'}
+            >
+              {audioLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+            </button>
+            <button onClick={() => handleSeek(currentTime - 10)} disabled={!audioUrl} className="p-2 text-[#6B66A8] disabled:opacity-40 rounded-lg hover:bg-white" title="אחורה 10 שניות">
+              <RotateCw className="w-4 h-4" />
+            </button>
+            <button onClick={() => handleSeek(currentTime + 10)} disabled={!audioUrl} className="p-2 text-[#6B66A8] disabled:opacity-40 rounded-lg hover:bg-white" title="קדימה 10 שניות">
+              <RotateCcw className="w-4 h-4" />
+            </button>
+            <div className="flex-1 min-w-[200px] flex items-center gap-1 h-12" aria-label="ציר זמן הקלטה">
+              {waveformBars.map((heightPct, idx) => {
+                const barRatio = (idx + 1) / waveformBars.length;
+                const active = barRatio <= progressRatio;
+                return (
                   <button
-                    onClick={() => setMuted((m) => !m)}
-                    className="p-1.5 text-slate-600 hover:text-slate-900 rounded"
-                    title={muted ? 'בטל השתקה' : 'השתק'}
-                  >
-                    {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={muted ? 0 : volume}
-                    onChange={(e) => {
-                      setMuted(false);
-                      setVolume(Number(e.target.value));
-                    }}
-                    className="w-16 accent-slate-700 h-1 cursor-pointer"
-                    aria-label="עוצמת שמע"
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSeek(barRatio * duration)}
+                    disabled={!audioUrl}
+                    className={`flex-1 rounded-full transition-colors ${active ? 'bg-[#8B7CF6]' : 'bg-[#D9D4FB] hover:bg-[#C4BCF8]'}`}
+                    style={{ height: `${heightPct}%` }}
                   />
-                </div>
-              </div>
+                );
+              })}
             </div>
-
-            {audioError && (
-              <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">
-                <ShieldAlert className="w-4 h-4 shrink-0" />
-                <span>{audioError}</span>
-              </div>
-            )}
-
-            {/* Participants & Security Boundary Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500 pt-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-medium text-slate-700">משתתפים מזוהים במרכזיה:</span>
-                {selectedRecording.participants.map((p, idx) => (
-                  <React.Fragment key={p.anonymizedLabel}>
-                    {idx > 0 && <span aria-hidden="true">·</span>}
-                    <span>{p.displayName}</span>
-                  </React.Fragment>
-                ))}
-              </div>
-              <div className="text-slate-500">
-                מדיניות אבטחה: בהעברה החיצונית נשלח קובץ השמע בלבד ללא ת.ז. או פרטי תיק.
-              </div>
+            <span className="text-[13px] font-bold tabular-nums text-[#6B66A8]" dir="ltr">
+              {formatDuration(currentTime)} / {formatDuration(duration || selectedRecording.durationSeconds)}
+            </span>
+            <div className="flex items-center gap-1.5">
+              {([1, 1.25, 1.5] as const).map((rate) => (
+                <button
+                  key={rate}
+                  onClick={() => setPlaybackRate(rate)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold tabular-nums ${
+                    playbackRate === rate ? 'bg-[#5B4CF0] text-white' : 'bg-white text-[#6B66A8] hover:bg-[#EEF0FF]'
+                  }`}
+                >
+                  {rate}x
+                </button>
+              ))}
             </div>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setMuted((m) => !m)} className="p-1.5 text-[#6B66A8] rounded" title={muted ? 'בטל השתקה' : 'השתק'}>
+                {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={muted ? 0 : volume}
+                onChange={(e) => {
+                  setMuted(false);
+                  setVolume(Number(e.target.value));
+                }}
+                className="w-16 accent-[#5B4CF0] h-1 cursor-pointer"
+                aria-label="עוצמת שמע"
+              />
+            </div>
+          </div>
+
+          {audioError && (
+            <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5">
+              <ShieldAlert className="w-4 h-4 shrink-0" />
+              <span>{audioError}</span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[13px] font-bold text-[#8A8FA3]">משתתפים:</span>
+            {selectedRecording.participants.map((p) => {
+              const [bg] = avatarFor(p.anonymizedLabel + p.displayName);
+              return (
+                <span key={p.anonymizedLabel} className="px-3.5 py-1.5 rounded-full text-[13px] font-semibold text-[#3D3A6B]" style={{ background: bg }}>
+                  {p.displayName}
+                </span>
+              );
+            })}
+            <span className="px-3.5 py-1.5 rounded-full text-[13px] font-semibold bg-[#FFF6D6] text-[#8A6100]">
+              🔒 רק השמע נשלח החוצה, בלי ת״ז ופרטי תיק
+            </span>
           </div>
         </section>
       )}
 
-      {/* Recordings Toolbar + Table */}
-      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex items-center gap-3 flex-1 flex-wrap">
-            <div className="relative flex-1 min-w-[210px] max-w-sm">
-              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="חיפוש לפי שם שיחה, לקוח או מחלקה..."
-                className="w-full pr-9 pl-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-
-            <select
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
-              aria-label="סינון לפי מחלקה"
-              className="px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 shrink-0"
-            >
-              <option value="all">כל המחלקות</option>
-              {INSTITUTIONAL_DEPARTMENTS.map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept}
-                </option>
-              ))}
-            </select>
-
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg shrink-0">
-              {(
-                [
-                  { id: 'all', label: 'הכל' },
-                  { id: 'pending', label: 'ממתינות' },
-                  { id: 'processing', label: 'בעיבוד' },
-                  { id: 'returned', label: 'דוח הוחזר' },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setStatusFilter(tab.id)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                    statusFilter === tab.id
-                      ? 'bg-white text-slate-900 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-xl font-extrabold text-[#1E1B4B] ml-2">הקלטות</h3>
+        {(
+          [
+            { id: 'all', label: `הכל (${recordings.length})` },
+            { id: 'pending', label: `ממתינות (${stats.pending.length})` },
+            { id: 'processing', label: `בעיבוד (${stats.analyzing.length})` },
+            { id: 'returned', label: `דוח הוחזר (${stats.returned})` },
+          ] as const
+        ).map((tab) => (
           <button
-            onClick={() => setShowAddModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium bg-[#0F2942] hover:bg-slate-800 text-white rounded-lg transition-colors whitespace-nowrap shrink-0"
+            key={tab.id}
+            onClick={() => setStatusFilter(tab.id)}
+            className={`px-3.5 py-1.5 rounded-full text-[13px] font-semibold transition-colors ${
+              statusFilter === tab.id ? 'bg-[#1E1B4B] text-white' : 'bg-white text-[#5F6672] hover:bg-[#EEF0FF]'
+            }`}
           >
-            <Plus className="w-4 h-4" />
-            <span>קליטת הקלטה חדשה למרכזיה</span>
+            {tab.label}
           </button>
-        </div>
+        ))}
+        <span className="flex-1" />
+        <select
+          value={departmentFilter}
+          onChange={(e) => setDepartmentFilter(e.target.value)}
+          aria-label="סינון לפי מחלקה"
+          className="px-4 py-2 text-[13px] font-semibold text-[#3D3A6B] bg-white rounded-full focus:outline-none focus:ring-2 focus:ring-[#5B4CF0]"
+        >
+          <option value="all">כל המחלקות</option>
+          {INSTITUTIONAL_DEPARTMENTS.map((dept) => (
+            <option key={dept} value={dept}>
+              {dept}
+            </option>
+          ))}
+        </select>
+      </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-right border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
-                <th className="py-3 px-3">שם שיחה ייחודי</th>
-                <th className="py-3 px-3">תאריך ושעה</th>
-                <th className="py-3 px-3">שם הלקוח</th>
-                <th className="py-3 px-3">מחלקה</th>
-                <th className="py-3 px-3">משתתפים</th>
-                <th className="py-3 px-3">משך</th>
-                <th className="py-3 px-3">סטטוס</th>
-                <th className="py-3 px-3 text-left">שליחה לתמלול וסיכום</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-sm">
-              {filteredRecordings.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-500">
-                    לא נמצאו הקלטות תואמות לחיפוש הנוכחי.
-                  </td>
-                </tr>
-              ) : (
-                filteredRecordings.map((rec) => {
-                  const isSelected = selectedRecording?.id === rec.id;
-                  const isBusy = transferringId === rec.id || rec.status === 'analyzing_external';
+      {/* Column headers */}
+      <div className={`hidden ${ROW_GRID} px-[18px] text-xs font-bold text-[#9A97C2]`}>
+        <span>לקוח</span>
+        <span className="text-center">שיחה</span>
+        <span className="text-center">משך</span>
+        <span className="text-center">משתתפים</span>
+        <span className="text-center">רגש</span>
+        <span className="text-center">סיכון נטישה</span>
+        <span className="text-center">סטטוס</span>
+        <span className="text-center">פעולות</span>
+      </div>
+
+      {/* Rows */}
+      <div className="space-y-2.5">
+        {filteredRecordings.length === 0 && (
+          <div className="bg-white rounded-2xl py-10 text-center text-sm text-[#8A8FA3]">לא נמצאו הקלטות תואמות לחיפוש הנוכחי.</div>
+        )}
+        {filteredRecordings.map((rec) => {
+          const isSelected = selectedRecording?.id === rec.id;
+          const isBusy = transferringId === rec.id || rec.status === 'analyzing_external';
+          const s = sentimentOf(rec);
+          const churn = churnColors(s ? s.churnRisk : null);
+          const rowWave = [8, 14, 10, 18, 12, 20, 9, 16, 11, 6];
+          return (
+            <div
+              key={rec.id}
+              onClick={() => onSelectRecording(rec.id)}
+              className={`cursor-pointer bg-white rounded-2xl px-[18px] py-3 flex flex-wrap items-center gap-3 ${ROW_GRID} transition-shadow hover:shadow-[0_6px_16px_rgba(91,76,240,0.10)] ${
+                isSelected ? 'ring-2 ring-[#8B7CF6] shadow-[0_6px_16px_rgba(91,76,240,0.10)]' : 'shadow-[0_3px_12px_rgba(91,76,240,0.06)]'
+              }`}
+            >
+              {/* customer */}
+              <div className="flex items-center gap-3 min-w-0 flex-1 lg:flex-none">
+                <Avatar name={rec.customerName} id={rec.customerId} />
+                <div className="min-w-0 text-right">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenCustomerReport(rec.customerId, rec.reportId);
+                    }}
+                    className="block text-[15px] font-extrabold text-[#1E1B4B] hover:text-[#5B4CF0] truncate max-w-full"
+                  >
+                    {rec.customerName}
+                  </button>
+                  <div className="text-xs font-medium text-[#8A8FA3] truncate" title={rec.department}>
+                    {rec.department}
+                  </div>
+                </div>
+              </div>
+              {/* call */}
+              <div className="flex flex-col items-start lg:items-center gap-1">
+                <span dir="ltr" className="px-2 py-0.5 rounded-md bg-[#F4F2FF] text-[11px] font-semibold font-mono text-[#6B66A8] truncate max-w-[146px]" title={rec.uniqueCallName}>
+                  {rec.uniqueCallName}
+                </span>
+                <span className="text-xs font-medium text-[#8A8FA3] tabular-nums">{formatCallDate(rec.callDate)}</span>
+              </div>
+              {/* duration + mini wave */}
+              <div className="flex items-center justify-center gap-2">
+                <span className="flex items-center gap-[3px]" aria-hidden="true">
+                  {rowWave.map((h, i) => (
+                    <span key={i} className="w-1 rounded-full" style={{ height: h, background: i < 6 ? '#8B7CF6' : '#D9D4FB' }} />
+                  ))}
+                </span>
+                <span className="text-[13px] font-bold tabular-nums text-[#3D3A6B]">{formatDuration(rec.durationSeconds)}</span>
+              </div>
+              {/* participants */}
+              <div className="flex items-center justify-center">
+                {rec.participants.slice(0, 2).map((p, i) => {
+                  const [bg, fg] = avatarFor(p.anonymizedLabel + p.displayName);
                   return (
-                    <tr
-                      key={rec.id}
-                      onClick={() => onSelectRecording(rec.id)}
-                      className={`cursor-pointer transition-colors ${
-                        isSelected ? 'bg-blue-50/60' : 'hover:bg-slate-50'
-                      }`}
+                    <span
+                      key={p.anonymizedLabel}
+                      title={p.displayName}
+                      className="w-[30px] h-[30px] rounded-full border-2 border-white flex items-center justify-center text-[11px] font-bold"
+                      style={{ background: bg, color: fg, marginInlineStart: i ? -8 : 0 }}
                     >
-                      <td className="py-3 px-3 font-mono text-xs font-medium text-slate-900 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <FileAudio className="w-4 h-4 text-slate-400 shrink-0" />
-                          <span>{rec.uniqueCallName}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-xs text-slate-600 tabular-nums whitespace-nowrap">
-                        {formatCallDate(rec.callDate)}
-                      </td>
-                      <td className="py-3 px-3 font-medium text-slate-900 whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenCustomerReport(rec.customerId, rec.reportId);
-                          }}
-                          className="hover:text-blue-700 hover:underline"
-                        >
-                          {rec.customerName}
-                        </button>
-                      </td>
-                      <td className="py-3 px-3 text-xs text-slate-600 max-w-[160px] truncate" title={rec.department}>
-                        {rec.department}
-                      </td>
-                      <td className="py-3 px-3 text-xs text-slate-600 tabular-nums whitespace-nowrap">
-                        {rec.participants.length} דוברים
-                      </td>
-                      <td className="py-3 px-3 text-xs font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                        {formatDuration(rec.durationSeconds)}
-                      </td>
-                      <td className="py-3 px-3 whitespace-nowrap">{renderStatusLabel(rec.status)}</td>
-                      <td className="py-3 px-3 text-left whitespace-nowrap">
-                        <div className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => handleRowListenClick(rec.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors whitespace-nowrap"
-                          >
-                            <Play className="w-3 h-3 text-slate-500" />
-                            <span>האזנה</span>
-                          </button>
-
-                          {rec.status === 'report_returned' && rec.reportId ? (
-                            <>
-                              <button
-                                onClick={() => onOpenPdf(rec.reportId!)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#0F2942] hover:bg-slate-800 rounded-md transition-colors whitespace-nowrap"
-                              >
-                                <FileText className="w-3.5 h-3.5" />
-                                <span>פתח PDF</span>
-                              </button>
-                              <button
-                                onClick={() => onOpenCustomerReport(rec.customerId, rec.reportId)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-md transition-colors whitespace-nowrap"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>כרטיס לקוח</span>
-                              </button>
-                            </>
-                          ) : null}
-
-                          <button
-                            onClick={() => {
-                              onSelectRecording(rec.id);
-                              void onTransferToExternal(rec.id);
-                            }}
-                            disabled={isBusy}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-700 hover:bg-blue-800 disabled:bg-slate-300 disabled:text-slate-600 rounded-md transition-colors whitespace-nowrap"
-                          >
-                            {isBusy ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Send className="w-3.5 h-3.5" />
-                            )}
-                            <span>
-                              {isBusy
-                                ? 'מתמלל ומסכם...'
-                                : rec.status === 'report_returned'
-                                ? 'תמלל וסכם מחדש'
-                                : 'שלח לתמלול וסיכום'}
-                            </span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                      {initialsOf(p.displayName)[0]}
+                    </span>
                   );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                })}
+                {rec.participants.length > 2 && (
+                  <span className="w-[30px] h-[30px] rounded-full border-2 border-white bg-[#EEF0FF] text-[#3D3A6B] flex items-center justify-center text-[11px] font-bold" style={{ marginInlineStart: -8 }}>
+                    +{rec.participants.length - 2}
+                  </span>
+                )}
+              </div>
+              {/* emotion */}
+              <div className="flex justify-center" title={s ? EMOTION_LABEL[s.endEmotion] : 'עוד לא נותח'}>
+                <Face mood={s ? EMOTION_MOOD[s.endEmotion] : 'Neutral'} size={34} active={Boolean(s)} />
+              </div>
+              {/* churn */}
+              <div className="w-[96px] space-y-1">
+                <div className="text-xs font-extrabold text-right" style={{ color: churn.text }}>
+                  {s ? `${s.churnRisk}%` : '—'}
+                </div>
+                <div className="h-1.5 rounded-full bg-[#EDEBFA] overflow-hidden flex justify-start">
+                  <div className="h-full rounded-full" style={{ width: `${s?.churnRisk ?? 0}%`, background: churn.bar }} />
+                </div>
+              </div>
+              {/* status */}
+              <div className="flex justify-center">
+                <Pill status={rec.status} />
+              </div>
+              {/* actions */}
+              <div className="flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => handleRowListenClick(rec.id)}
+                  className="w-9 h-9 rounded-[10px] bg-[#5B4CF0] hover:bg-[#4A3BDF] text-white flex items-center justify-center"
+                  title="האזנה"
+                >
+                  <Play className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => rec.reportId && onOpenPdf(rec.reportId)}
+                  disabled={!(rec.status === 'report_returned' && rec.reportId)}
+                  className="w-9 h-9 rounded-[10px] bg-[#EEF0FF] text-[#5B4CF0] hover:bg-[#E2E0FF] disabled:opacity-35 flex items-center justify-center"
+                  title="פתח PDF"
+                >
+                  <FileText className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    onSelectRecording(rec.id);
+                    void onTransferToExternal(rec.id);
+                  }}
+                  disabled={isBusy}
+                  className="w-9 h-9 rounded-[10px] bg-[#F4F5F9] text-[#6B66A8] hover:bg-[#EEF0FF] disabled:opacity-50 flex items-center justify-center"
+                  title={rec.status === 'report_returned' ? 'תמלל וסכם מחדש' : 'שלח לתמלול וסיכום'}
+                >
+                  {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {/* Add / Upload / Record New Call Modal */}
       {showAddModal && (

@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     due_date TEXT,
     done INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id INTEGER NOT NULL,
+    score INTEGER,
+    comment TEXT,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -281,3 +288,41 @@ def get_policy() -> str:
 def set_policy(text: str) -> None:
     with connect() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('policy', ?)", (text,))
+
+
+# ---------- משוב לקוח על השירות (מהמייל) ----------
+
+def save_feedback(call_id: int, score: int | None = None, comment: str | None = None) -> None:
+    with connect() as conn:
+        conn.execute("INSERT INTO feedback (call_id, score, comment) VALUES (?, ?, ?)", (call_id, score, comment))
+
+
+def latest_feedback_score(call_id: int) -> int | None:
+    with connect() as conn:
+        row = conn.execute("SELECT score FROM feedback WHERE call_id = ? AND score IS NOT NULL ORDER BY id DESC LIMIT 1",
+                           (call_id,)).fetchone()
+        return row["score"] if row else None
+
+
+# ---------- בקרת ציות: רשימת הבדיקות של העסק (ניתנת לעריכה) ----------
+
+DEFAULT_COMPLIANCE = [
+    "הודעה על הקלטת השיחה: הנציג הודיע ללקוח בתחילת השיחה שהשיחה מוקלטת",
+    "זיהוי לקוח: הנציג אימת את זהות הלקוח לפני שמסר או שינה מידע אישי",
+    "גילוי נאות על עלויות ועמלות: הנציג הציג עלויות, עמלות ותנאים מהותיים לפני שהלקוח הסכים",
+    "אימות סכומים ותאריכים: כל סכום או תאריך שסוכם נאמר בבירור ובאופן חד-משמעי",
+]
+
+
+def get_compliance_checks() -> list[str]:
+    with connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'compliance'").fetchone()
+    if row is None:
+        return list(DEFAULT_COMPLIANCE)
+    return [line.strip() for line in row["value"].splitlines() if line.strip()]
+
+
+def set_compliance_checks(lines: list[str]) -> None:
+    with connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('compliance', ?)",
+                     ("\n".join(x.strip() for x in lines if x.strip()),))

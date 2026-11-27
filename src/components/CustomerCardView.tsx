@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { createCustomer, fetchWrapupPdfBlob, revealCustomerId, updateCustomerEmails } from '../api';
+import { ComplianceAndUpdates } from './wrapup/ComplianceAndUpdates';
 import { INSTITUTIONAL_DEPARTMENTS } from '../constants';
 import type { CalendarEvent, CallAnalysisReport, CustomerRecord, SystemSnapshot, TaskPriority } from '../types';
 
@@ -303,6 +304,18 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
               <div className="text-slate-500 mb-1">סטטוס תיק</div>
               <div className="font-medium text-slate-900">{activeCustomer.caseStatus}</div>
             </div>
+            {activeCustomer.crmFields && Object.keys(activeCustomer.crmFields).length > 0 && (
+              <div className="col-span-2 sm:col-span-4">
+                <div className="text-slate-500 mb-1">שדות שעודכנו מתוך שיחות (WrapUpAI)</div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(activeCustomer.crmFields).map(([k, v]) => (
+                    <span key={k} className="px-2 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-900">
+                      <b>{k}:</b> {v}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="col-span-2 sm:col-span-4">
               <div className="text-slate-500 mb-1">דוא״ל לסיכומי שיחה (WrapUpAI)</div>
               {editingEmails === null || editingFor !== activeCustomer.id ? (
@@ -401,7 +414,7 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                   <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                     {/* Report Header & Executive Summary */}
                     <div className="p-6 border-b border-slate-200 space-y-4">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="flex flex-col gap-3">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2 text-xs font-medium text-emerald-700">
                             <ShieldCheck className="w-4 h-4" />
@@ -471,6 +484,8 @@ export const CustomerCardView: React.FC<CustomerCardViewProps> = ({
                           {activeReport.wrapup.delivery}
                         </div>
                       )}
+
+                      <ComplianceAndUpdates token={token} report={activeReport} />
 
                       <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
                         <Users className="w-4 h-4 text-slate-400 shrink-0" />
